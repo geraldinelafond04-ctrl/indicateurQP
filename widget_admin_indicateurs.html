@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Pilotage des indicateurs - Prefecture 04</title>
+
+<!--
+  PROTOTYPE - widget custom Grist, volet ADMINISTRATEUR
+  ---------------------------------------------------------------
+  Contrairement au volet service (verrouille sur le trimestre en
+  cours), ce widget permet de choisir librement l'annee, le type
+  de periode et le service, pour piloter/consolider/exporter.
+
+  A ADAPTER avant deploiement :
+  - ligne GRIST_API_URL ci-dessous si ton instance n'est pas
+    grist.numerique.gouv.fr
+
+  A faire plus tard (hors prototype) :
+  - proteger cette page par une regle d'acces Grist (Access Rules)
+    pour qu'un agent de service ne puisse pas y acceder, meme en
+    devinant l'URL du widget.
+-->
+<script src="https://grist.numerique.gouv.fr/grist-plugin-api.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<style>
+  :root{
+    --bleu: #000091;
+    --bleu-clair: #E5E5F4;
+    --rouge: #E1000F;
+    --vert: #18753C;
+    --vert-clair: #E8F5EC;
+    --orange: #B34000;
+    --orange-clair: #FDEEE5;
+    --gris-fond: #F6F6F6;
+    --gris-bordure: #DDDDDD;
+    --texte: #1E1E1E;
+    --texte-secondaire: #6A6A6A;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family:-apple-system,"Segoe UI",Arial,sans-serif;
+    background:var(--gris-fond);
+    color:var(--texte);
+    font-size:14px;
+  }
+  header{
+    background:var(--bleu);
+    color:#fff;
+    padding:14px 20px;
+  }
+  header h1{font-size:16px;font-weight:600;margin:0 0 10px}
+  .controls{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+  }
+  select{
+    padding:6px 10px;
+    border-radius:4px;
+    border:none;
+    font-size:13px;
+  }
+  .btn-export{
+    background:#fff;
+    color:var(--bleu);
+    border:none;
+    padding:8px 16px;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    margin-left:auto;
+  }
+  .btn-export:disabled{opacity:.5;cursor:not-allowed}
+
+  .synthese{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:12px;
+    padding:16px 16px 0;
+  }
+  .carte{
+    background:#fff;
+    border:1px solid var(--gris-bordure);
+    border-radius:8px;
+    padding:12px 14px;
+  }
+  .carte .label{font-size:12px;color:var(--texte-secondaire)}
+  .carte .valeur{font-size:22px;font-weight:600;margin-top:2px}
+
+  .layout{
+    display:grid;
+    grid-template-columns:1fr 380px;
+    gap:16px;
+    padding:16px;
+    align-items:start;
+  }
+  .panel{background:#fff;border:1px solid var(--gris-bordure);border-radius:8px}
+  .panel-header{
+    padding:12px 14px;
+    border-bottom:1px solid var(--gris-bordure);
+    font-weight:600;
+    display:flex;
+    justify-content:space-between;
+  }
+  table.liste{width:100%;border-collapse:collapse;font-size:13px}
+  table.liste th{
+    text-align:left;
+    padding:8px 12px;
+    color:var(--texte-secondaire);
+    font-weight:500;
+    font-size:11px;
+    text-transform:uppercase;
+    border-bottom:1px solid var(--gris-bordure);
+  }
+  table.liste td{padding:8px 12px;border-bottom:1px solid #f0f0f0}
+  table.liste tr{cursor:pointer}
+  table.liste tr:hover{background:var(--gris-fond)}
+  table.liste tr.actif{background:var(--bleu-clair)}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+  .dot.attente{background:var(--rouge)}
+  .dot.partielle{background:var(--orange)}
+  .dot.ok{background:var(--vert)}
+  .empty-state{padding:30px 16px;text-align:center;color:var(--texte-secondaire);font-size:13px}
+
+  .fiche{padding:16px}
+  .fiche-titre{font-size:15px;font-weight:600;margin:0 0 2px}
+  .fiche-service{font-size:12px;color:var(--texte-secondaire);margin-bottom:14px}
+  .champ{margin-bottom:12px}
+  .champ label{display:block;font-size:12px;color:var(--texte-secondaire);margin-bottom:4px}
+  .champ input, .champ textarea{
+    width:100%;padding:8px 10px;border:1px solid var(--gris-bordure);
+    border-radius:4px;font-size:13px;font-family:inherit;
+  }
+  .statuts{display:flex;gap:6px;margin:14px 0}
+  .btn-statut{
+    flex:1;padding:8px;border-radius:6px;border:1px solid var(--gris-bordure);
+    background:#fff;font-size:11px;cursor:pointer;color:var(--texte-secondaire);
+  }
+  .btn-statut.selectionne.partielle{border:2px solid var(--orange);background:var(--orange-clair);color:var(--orange);font-weight:600}
+  .btn-statut.selectionne.consolidee{border:2px solid var(--bleu);background:var(--bleu-clair);color:var(--bleu);font-weight:600}
+  .btn-statut.selectionne.validee{border:2px solid var(--vert);background:var(--vert-clair);color:var(--vert);font-weight:600}
+  .btn-save{
+    background:var(--bleu);color:#fff;border:none;padding:9px 18px;
+    border-radius:6px;font-size:13px;cursor:pointer;width:100%;
+  }
+  .message-etat{font-size:12px;margin-top:10px;padding:8px 10px;border-radius:4px}
+  .message-etat.succes{background:var(--vert-clair);color:var(--vert)}
+  .message-etat.erreur{background:var(--orange-clair);color:var(--orange)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pilotage des indicateurs qualite - performance</h1>
+  <div class="controls">
+    <select id="select-annee"></select>
+    <select id="select-type-periode">
+      <option value="Trimestrielle">Trimestrielle</option>
+      <option value="Mensuelle">Mensuelle</option>
+      <option value="Semestrielle">Semestrielle</option>
+      <option value="Annuelle">Annuelle</option>
+    </select>
+    <select id="select-periode-valeur"></select>
+    <select id="select-service"><option value="">Tous les services</option></select>
+    <button class="btn-export" id="btn-export-odt" disabled>Exporter en ODT</button>
+  </div>
+</header>
+
+<div class="synthese" id="synthese"></div>
+
+<div class="layout">
+  <div class="panel">
+    <div class="panel-header">
+      <span>Indicateurs</span>
+      <span id="compteur" style="font-weight:400;font-size:12px;color:var(--texte-secondaire)">0 / 0</span>
+    </div>
+    <table class="liste">
+      <thead><tr><th></th><th>Service</th><th>Indicateur</th><th>Valeur</th><th>Statut</th></tr></thead>
+      <tbody id="corps-liste"></tbody>
+    </table>
+  </div>
+
+  <div class="panel" id="panel-fiche">
+    <div class="empty-state">Selectionnez une ligne pour la consulter ou la corriger</div>
+  </div>
+</div>
+
+<script>
+let TABLES = {};
+let SERVICES = [];
+let TOUTES_SAISIES = [];
+let lignesFiltrees = [];
+let ligneSelectionneeId = null;
+let statutChoisi = null;
+
+const PERIODES_PAR_TYPE = {
+  Trimestrielle: ['T1', 'T2', 'T3', 'T4'],
+  Mensuelle: ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'],
+  Semestrielle: ['S1', 'S2'],
+  Annuelle: ['Annuel']
+};
+
+grist.ready({ requiredAccess: 'full' });
+
+function tableEnLignes(table) {
+  const lignes = [];
+  const nb = table.id.length;
+  for (let i = 0; i < nb; i++) {
+    const ligne = { id: table.id[i] };
+    for (const col in table) {
+      if (col === 'id') continue;
+      ligne[col] = table[col][i];
+    }
+    lignes.push(ligne);
+  }
+  return lignes;
+}
+
+async function chargerDonnees() {
+  const [saisies, services] = await Promise.all([
+    grist.docApi.fetchTable('SAISIES'),
+    grist.docApi.fetchTable('SERVICES')
+  ]);
+  TABLES = { saisies };
+  SERVICES = tableEnLignes(services);
+  TOUTES_SAISIES = tableEnLignes(saisies);
+
+  remplirAnnees();
+  remplirPeriodeValeur();
+  remplirServices();
+  appliquerFiltres();
+}
+
+function remplirAnnees() {
+  const select = document.getElementById('select-annee');
+  const annees = [...new Set(TOUTES_SAISIES.map(l => l.Annee).filter(a => a))].sort((a, b) => b - a);
+  if (annees.length === 0) annees.push(new Date().getFullYear());
+  select.innerHTML = annees.map(a => `<option value="${a}">${a}</option>`).join('');
+  select.addEventListener('change', appliquerFiltres);
+}
+
+function remplirPeriodeValeur() {
+  const selectType = document.getElementById('select-type-periode');
+  const selectValeur = document.getElementById('select-periode-valeur');
+  function maj() {
+    const options = PERIODES_PAR_TYPE[selectType.value] || [];
+    selectValeur.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join('');
+    appliquerFiltres();
+  }
+  selectType.addEventListener('change', maj);
+  selectValeur.addEventListener('change', appliquerFiltres);
+  maj();
+}
+
+function remplirServices() {
+  const select = document.getElementById('select-service');
+  select.innerHTML = '<option value="">Tous les services</option>' +
+    SERVICES.map(s => `<option value="${s.id}">${s.Libelle}</option>`).join('');
+  select.addEventListener('change', appliquerFiltres);
+}
+
+function nomService(serviceId) {
+  const s = SERVICES.find(s => s.id === serviceId);
+  return s ? s.Libelle : '(service inconnu)';
+}
+
+// ---------------------------------------------------------------
+// Filtrage selon les 4 selecteurs (annee, type periode, periode, service)
+// ---------------------------------------------------------------
+function appliquerFiltres() {
+  ligneSelectionneeId = null;
+  document.getElementById('panel-fiche').innerHTML =
+    '<div class="empty-state">Selectionnez une ligne pour la consulter ou la corriger</div>';
+
+  const annee = Number(document.getElementById('select-annee').value);
+  const typePeriode = document.getElementById('select-type-periode').value;
+  const periodeValeur = document.getElementById('select-periode-valeur').value;
+  const serviceId = document.getElementById('select-service').value;
+
+  lignesFiltrees = TOUTES_SAISIES.filter(l =>
+    l.Annee === annee &&
+    l.Periode_Type === typePeriode &&
+    l.Periode_valeur === periodeValeur &&
+    (serviceId === '' || String(l.Service) === String(serviceId))
+  );
+
+  document.getElementById('btn-export-odt').disabled = lignesFiltrees.length === 0;
+  afficherSynthese();
+  afficherListe();
+}
+
+function afficherSynthese() {
+  const total = lignesFiltrees.length;
+  const remplis = lignesFiltrees.filter(l => l.Valeur !== null && l.Valeur !== '' && l.Valeur !== undefined).length;
+  const valides = lignesFiltrees.filter(l => l.Statut === 'Validée').length;
+  const parService = new Set(lignesFiltrees.map(l => l.Service)).size;
+
+  document.getElementById('synthese').innerHTML = `
+    <div class="carte"><div class="label">Indicateurs</div><div class="valeur">${total}</div></div>
+    <div class="carte"><div class="label">Saisis</div><div class="valeur">${remplis} / ${total}</div></div>
+    <div class="carte"><div class="label">Valides</div><div class="valeur">${valides}</div></div>
+    <div class="carte"><div class="label">Services concernes</div><div class="valeur">${parService}</div></div>
+  `;
+}
+
+function classeStatutDot(ligne) {
+  const valeurVide = ligne.Valeur === null || ligne.Valeur === '' || ligne.Valeur === undefined;
+  if (valeurVide) return 'attente';
+  if (ligne.Statut === 'Validée' || ligne.Statut === 'Consolidée') return 'ok';
+  return 'partielle';
+}
+
+function afficherListe() {
+  const corps = document.getElementById('corps-liste');
+  document.getElementById('compteur').textContent =
+    `${lignesFiltrees.filter(l => l.Valeur !== null && l.Valeur !== '' && l.Valeur !== undefined).length} / ${lignesFiltrees.length}`;
+
+  if (lignesFiltrees.length === 0) {
+    corps.innerHTML = '<tr><td colspan="5" class="empty-state">Aucune ligne pour ces filtres</td></tr>';
+    return;
+  }
+
+  corps.innerHTML = lignesFiltrees.map(l => `
+    <tr data-id="${l.id}">
+      <td><span class="dot ${classeStatutDot(l)}"></span></td>
+      <td>${nomService(l.Service)}</td>
+      <td>${l.Indicateur_Libelle || ''}</td>
+      <td>${l.Valeur ?? '-'}</td>
+      <td>${l.Statut || 'A saisir'}</td>
+    </tr>
+  `).join('');
+
+  corps.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', () => afficherFiche(Number(tr.dataset.id)));
+  });
+}
+
+// ---------------------------------------------------------------
+// Fiche de detail / correction (l'administrateur peut aussi valider)
+// ---------------------------------------------------------------
+function afficherFiche(id) {
+  ligneSelectionneeId = id;
+  const ligne = lignesFiltrees.find(l => l.id === id);
+  if (!ligne) return;
+  statutChoisi = ligne.Statut || null;
+
+  document.querySelectorAll('table.liste tr').forEach(tr => {
+    tr.classList.toggle('actif', Number(tr.dataset.id) === id);
+  });
+
+  document.getElementById('panel-fiche').innerHTML = `
+    <div class="fiche">
+      <div class="fiche-titre">${ligne.Indicateur_Libelle || ''}</div>
+      <div class="fiche-service">${nomService(ligne.Service)} · ${ligne.Periode_valeur} ${ligne.Annee}</div>
+
+      <div class="champ">
+        <label>Valeur</label>
+        <input type="text" id="champ-valeur" value="${ligne.Valeur ?? ''}">
+      </div>
+      <div class="champ">
+        <label>Commentaire</label>
+        <textarea id="champ-commentaire" rows="3">${ligne.Commentaire ?? ''}</textarea>
+      </div>
+
+      <div class="statuts" id="zone-statuts">
+        ${boutonStatut('Partielle', 'partielle')}
+        ${boutonStatut('Consolidée', 'consolidee')}
+        ${boutonStatut('Validée', 'validee')}
+      </div>
+
+      <button class="btn-save" id="btn-enregistrer">Enregistrer</button>
+      <div id="zone-message"></div>
+    </div>
+  `;
+
+  document.querySelectorAll('.btn-statut').forEach(btn => {
+    btn.addEventListener('click', () => {
+      statutChoisi = btn.dataset.valeur;
+      document.querySelectorAll('.btn-statut').forEach(b => b.classList.remove('selectionne'));
+      btn.classList.add('selectionne');
+    });
+  });
+
+  document.getElementById('btn-enregistrer').addEventListener('click', enregistrerLigne);
+}
+
+function boutonStatut(valeur, classe) {
+  const selectionne = statutChoisi === valeur ? `selectionne ${classe}` : '';
+  return `<button type="button" class="btn-statut ${selectionne}" data-valeur="${valeur}">${valeur}</button>`;
+}
+
+async function enregistrerLigne() {
+  if (!ligneSelectionneeId) return;
+  const bouton = document.getElementById('btn-enregistrer');
+  const zoneMessage = document.getElementById('zone-message');
+  bouton.disabled = true;
+
+  const valeur = document.getElementById('champ-valeur').value;
+  const commentaire = document.getElementById('champ-commentaire').value;
+
+  try {
+    await grist.docApi.applyUserActions([
+      ['UpdateRecord', 'SAISIES', ligneSelectionneeId, {
+        Valeur: valeur === '' ? null : Number(valeur),
+        Commentaire: commentaire,
+        Statut: statutChoisi
+      }]
+    ]);
+    zoneMessage.innerHTML = '<div class="message-etat succes">Enregistre</div>';
+    await chargerDonnees();
+  } catch (erreur) {
+    zoneMessage.innerHTML = `<div class="message-etat erreur">Erreur : ${erreur.message}</div>`;
+  } finally {
+    bouton.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------
+// Export ODT de la selection courante (tous services confondus
+// si "Tous les services" est choisi)
+// ---------------------------------------------------------------
+function echapperXml(texte) {
+  return String(texte ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function construireContentXml(titreFiltre, lignes) {
+  const entetes = ['Service', 'Indicateur', 'Periode', 'Valeur', 'Valeur finale', 'Statut', 'Commentaire'];
+
+  const ligneEntete = '<table:table-row>' + entetes.map(e =>
+    `<table:table-cell table:style-name="CelluleEntete"><text:p text:style-name="TexteEntete">${echapperXml(e)}</text:p></table:table-cell>`
+  ).join('') + '</table:table-row>';
+
+  const lignesDonnees = lignes.map(l => {
+    const valeurs = [
+      nomService(l.Service),
+      l.Indicateur_Libelle || '',
+      `${l.Periode_valeur || ''} ${l.Annee || ''}`,
+      l.Valeur ?? '',
+      (l.Type_cible === 'DE_Performance' ? (l.Valeur_finale ?? '') : ''),
+      l.Statut || 'A saisir',
+      l.Commentaire || ''
+    ];
+    return '<table:table-row>' + valeurs.map(v =>
+      `<table:table-cell table:style-name="Cellule"><text:p text:style-name="TexteCellule">${echapperXml(v)}</text:p></table:table-cell>`
+    ).join('') + '</table:table-row>';
+  }).join('');
+
+  const colonnes = entetes.map(() => '<table:table-column/>').join('');
+  const dateGeneration = new Date().toLocaleDateString('fr-FR');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2">
+<office:automatic-styles>
+<style:style style:name="Titre" style:family="paragraph"><style:text-properties fo:font-size="18pt" fo:font-weight="bold" fo:color="#000091"/></style:style>
+<style:style style:name="SousTitre" style:family="paragraph"><style:text-properties fo:font-size="11pt" fo:color="#6a6a6a"/></style:style>
+<style:style style:name="CelluleEntete" style:family="table-cell"><style:table-cell-properties fo:background-color="#000091" fo:border="0.5pt solid #000000" fo:padding="0.1cm"/></style:style>
+<style:style style:name="TexteEntete" style:family="paragraph"><style:text-properties fo:color="#ffffff" fo:font-weight="bold" fo:font-size="9pt"/></style:style>
+<style:style style:name="Cellule" style:family="table-cell"><style:table-cell-properties fo:border="0.5pt solid #cccccc" fo:padding="0.1cm"/></style:style>
+<style:style style:name="TexteCellule" style:family="paragraph"><style:text-properties fo:font-size="9pt"/></style:style>
+</office:automatic-styles>
+<office:body>
+<office:text>
+<text:p text:style-name="Titre">Indicateurs qualite - performance</text:p>
+<text:p text:style-name="SousTitre">${echapperXml(titreFiltre)}</text:p>
+<text:p text:style-name="SousTitre">Genere le ${dateGeneration}</text:p>
+<text:p/>
+<table:table table:name="Indicateurs">
+${colonnes}
+<table:table-header-rows>${ligneEntete}</table:table-header-rows>
+${lignesDonnees}
+</table:table>
+</office:text>
+</office:body>
+</office:document-content>`;
+}
+
+async function exporterODT() {
+  if (lignesFiltrees.length === 0) return;
+
+  const annee = document.getElementById('select-annee').value;
+  const typePeriode = document.getElementById('select-type-periode').value;
+  const periodeValeur = document.getElementById('select-periode-valeur').value;
+  const serviceId = document.getElementById('select-service').value;
+  const serviceLabel = serviceId ? nomService(Number(serviceId)) : 'Tous les services';
+  const titreFiltre = `${serviceLabel} - ${typePeriode} ${periodeValeur} ${annee}`;
+
+  const contentXml = construireContentXml(titreFiltre, lignesFiltrees);
+
+  const manifestXml = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
+<manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.text"/>
+<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>`;
+
+  const zip = new JSZip();
+  zip.file('mimetype', 'application/vnd.oasis.opendocument.text', { compression: 'STORE' });
+  zip.folder('META-INF').file('manifest.xml', manifestXml);
+  zip.file('content.xml', contentXml);
+
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.oasis.opendocument.text' });
+  const url = URL.createObjectURL(blob);
+  const lien = document.createElement('a');
+  lien.href = url;
+  lien.download = `indicateurs_${titreFiltre.replace(/[^a-zA-Z0-9]+/g, '_')}.odt`;
+  document.body.appendChild(lien);
+  lien.click();
+  document.body.removeChild(lien);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('btn-export-odt').addEventListener('click', exporterODT);
+
+chargerDonnees();
+</script>
+
+</body>
+</html>
