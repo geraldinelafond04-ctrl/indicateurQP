@@ -293,7 +293,9 @@ async function chargerDonnees() {
   ]);
 
   TABLES = { saisies, indicPerf, donneesElem, indicQualite, donneesElemQualite };
-  SERVICES = tableEnLignes(services).filter(s => s.Actif);
+  // Note : la colonne SERVICES.Actif est une formule vide dans ce document
+  // (toujours fausse) -> on ne filtre pas dessus pour l'instant.
+  SERVICES = tableEnLignes(services);
   PARAMETRES = tableEnLignes(parametres)[0] || null;
 
   remplirServices();
@@ -492,3 +494,4 @@ chargerDonnees();
 
 </body>
 </html>
+<html><head></head><body></body></html>
