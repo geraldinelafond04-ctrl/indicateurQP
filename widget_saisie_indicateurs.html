@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Saisie des indicateurs - Prefecture 04</title>
+
+<!--
+  PROTOTYPE - widget custom Grist
+  ---------------------------------------------------------------
+  A DEPLOYER : dans Grist, ajouter une page > Widget personnalise >
+  URL = adresse ou ce fichier est heberge (ex: GitHub Pages, ou un
+  petit hebergement interne). Choisir "Acces total au document"
+  (requiredAccess: full) quand Grist le demande.
+
+  Ce fichier ne contient AUCUNE cle API : toute la communication
+  passe par grist-plugin-api.js, charge depuis TON instance Grist,
+  donc le widget reste dans le perimetre de securite du document.
+
+  A ADAPTER avant deploiement :
+  - ligne GRIST_API_URL ci-dessous : mets l'URL de ton instance
+    (ex: https://grist.numerique.gouv.fr/grist-plugin-api.js)
+-->
+<script src="https://grist.numerique.gouv.fr/grist-plugin-api.js"></script>
+
+<style>
+  :root{
+    --bleu: #000091;
+    --bleu-clair: #E5E5F4;
+    --rouge: #E1000F;
+    --vert: #18753C;
+    --vert-clair: #E8F5EC;
+    --orange: #B34000;
+    --orange-clair: #FDEEE5;
+    --gris-fond: #F6F6F6;
+    --gris-bordure: #DDDDDD;
+    --texte: #1E1E1E;
+    --texte-secondaire: #6A6A6A;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family:-apple-system,"Segoe UI",Arial,sans-serif;
+    background:var(--gris-fond);
+    color:var(--texte);
+    font-size:14px;
+  }
+  header{
+    background:var(--bleu);
+    color:#fff;
+    padding:14px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  header h1{
+    font-size:16px;
+    font-weight:600;
+    margin:0;
+  }
+  header .sub{
+    font-size:12px;
+    opacity:.85;
+    margin-top:2px;
+  }
+  .controls{
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  select{
+    padding:6px 10px;
+    border-radius:4px;
+    border:none;
+    font-size:13px;
+  }
+  .layout{
+    display:grid;
+    grid-template-columns:280px 1fr;
+    gap:16px;
+    padding:16px;
+    align-items:start;
+  }
+  .panel{
+    background:#fff;
+    border:1px solid var(--gris-bordure);
+    border-radius:8px;
+  }
+  .panel-header{
+    padding:12px 14px;
+    border-bottom:1px solid var(--gris-bordure);
+    font-weight:600;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .progress{
+    font-weight:400;
+    font-size:12px;
+    color:var(--texte-secondaire);
+  }
+  .liste{
+    max-height:70vh;
+    overflow-y:auto;
+  }
+  .item{
+    padding:10px 14px;
+    border-bottom:1px solid #f0f0f0;
+    cursor:pointer;
+    display:flex;
+    align-items:flex-start;
+    gap:8px;
+  }
+  .item:hover{background:var(--gris-fond)}
+  .item.actif{background:var(--bleu-clair)}
+  .dot{
+    width:9px;height:9px;border-radius:50%;
+    margin-top:4px;flex-shrink:0;
+  }
+  .dot.attente{background:var(--rouge)}
+  .dot.partielle{background:var(--orange)}
+  .dot.ok{background:var(--vert)}
+  .item-texte{font-size:13px;line-height:1.3}
+  .item-code{font-size:11px;color:var(--texte-secondaire)}
+  .empty-state{
+    padding:30px 16px;
+    text-align:center;
+    color:var(--texte-secondaire);
+    font-size:13px;
+  }
+  .fiche{padding:20px}
+  .fiche-entete{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:18px;
+    gap:12px;
+  }
+  .fiche-code{font-size:12px;color:var(--texte-secondaire)}
+  .fiche-titre{font-size:17px;font-weight:600;margin:4px 0 0}
+  .tampon{
+    border:2px solid var(--gris-bordure);
+    color:var(--texte-secondaire);
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.5px;
+    padding:5px 12px;
+    border-radius:6px;
+    transform:rotate(-4deg);
+    white-space:nowrap;
+  }
+  .tampon.partielle{border-color:var(--orange);color:var(--orange)}
+  .tampon.consolidee{border-color:var(--bleu);color:var(--bleu)}
+  .tampon.validee{border-color:var(--vert);color:var(--vert)}
+  .badge{
+    display:inline-block;
+    font-size:11px;
+    font-weight:600;
+    padding:3px 8px;
+    border-radius:4px;
+    margin-right:6px;
+    margin-bottom:6px;
+  }
+  .badge.pap{background:var(--bleu-clair);color:var(--bleu)}
+  .badge.alerte{background:var(--orange-clair);color:var(--orange)}
+  .champs{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px;
+    margin-bottom:14px;
+  }
+  .champ label{
+    display:block;
+    font-size:12px;
+    color:var(--texte-secondaire);
+    margin-bottom:4px;
+  }
+  .champ input, .champ textarea{
+    width:100%;
+    padding:8px 10px;
+    border:1px solid var(--gris-bordure);
+    border-radius:4px;
+    font-size:13px;
+    font-family:inherit;
+  }
+  .champ.pleine-largeur{grid-column:1 / -1}
+  .valeur-finale{
+    font-size:12px;
+    color:var(--texte-secondaire);
+    margin-top:4px;
+  }
+  .statuts{
+    display:flex;
+    gap:8px;
+    margin:16px 0;
+  }
+  .btn-statut{
+    flex:1;
+    padding:9px;
+    border-radius:6px;
+    border:1px solid var(--gris-bordure);
+    background:#fff;
+    font-size:12px;
+    cursor:pointer;
+    color:var(--texte-secondaire);
+  }
+  .btn-statut.selectionne.partielle{border:2px solid var(--orange);background:var(--orange-clair);color:var(--orange);font-weight:600}
+  .btn-statut.selectionne.consolidee{border:2px solid var(--bleu);background:var(--bleu-clair);color:var(--bleu);font-weight:600}
+  .btn-statut.selectionne.validee{border:2px solid var(--vert);background:var(--vert-clair);color:var(--vert);font-weight:600}
+  .pied{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    border-top:1px solid var(--gris-bordure);
+    padding-top:14px;
+  }
+  .auteur{font-size:12px;color:var(--texte-secondaire)}
+  .btn-save{
+    background:var(--bleu);
+    color:#fff;
+    border:none;
+    padding:9px 18px;
+    border-radius:6px;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .btn-save:hover{opacity:.9}
+  .btn-save:disabled{opacity:.5;cursor:not-allowed}
+  .message-etat{
+    font-size:12px;
+    margin-top:10px;
+    padding:8px 10px;
+    border-radius:4px;
+  }
+  .message-etat.succes{background:var(--vert-clair);color:var(--vert)}
+  .message-etat.erreur{background:var(--orange-clair);color:var(--orange)}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Indicateurs qualite - performance</h1>
+    <div class="sub" id="periode-active">Periode en cours : chargement...</div>
+  </div>
+  <div class="controls">
+    <select id="select-service"><option>Chargement des services...</option></select>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="panel">
+    <div class="panel-header">
+      <span>A saisir</span>
+      <span class="progress" id="compteur">0 / 0</span>
+    </div>
+    <div class="liste" id="liste-indicateurs">
+      <div class="empty-state">Selectionnez un service</div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-fiche">
+    <div class="empty-state">Cliquez sur un indicateur dans la liste pour le saisir</div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------
+// Etat global du prototype
+// ---------------------------------------------------------------
+let TABLES = {};        // contenu brut des tables Grist
+let SERVICES = [];       // liste des services
+let PARAMETRES = null;   // annee/periode active
+let saisiesFiltrees = [];// lignes SAISIES pour le service + periode selectionnes
+let ligneSelectionneeId = null;
+let statutChoisi = null;
+
+// ---------------------------------------------------------------
+// Connexion a Grist (reste entierement dans le document)
+// ---------------------------------------------------------------
+grist.ready({ requiredAccess: 'full' });
+
+async function chargerDonnees() {
+  const [saisies, services, parametres, indicPerf, donneesElem, indicQualite, donneesElemQualite] = await Promise.all([
+    grist.docApi.fetchTable('SAISIES'),
+    grist.docApi.fetchTable('SERVICES'),
+    grist.docApi.fetchTable('PARAMETRES'),
+    grist.docApi.fetchTable('Indicateurs_Performance_2026'),
+    grist.docApi.fetchTable('Donnees_elementaires'),
+    grist.docApi.fetchTable('Indicateurs_Qualite'),
+    grist.docApi.fetchTable('Donnees_elementaires_Qualite')
+  ]);
+
+  TABLES = { saisies, indicPerf, donneesElem, indicQualite, donneesElemQualite };
+  SERVICES = tableEnLignes(services).filter(s => s.Actif);
+  PARAMETRES = tableEnLignes(parametres)[0] || null;
+
+  remplirServices();
+  afficherPeriodeActive();
+}
+
+// grist.docApi.fetchTable renvoie des colonnes en tableaux paralleles :
+// on les remet sous forme de tableau d'objets, plus simple a manipuler
+function tableEnLignes(table) {
+  const lignes = [];
+  const nb = table.id.length;
+  for (let i = 0; i < nb; i++) {
+    const ligne = { id: table.id[i] };
+    for (const col in table) {
+      if (col === 'id') continue;
+      ligne[col] = table[col][i];
+    }
+    lignes.push(ligne);
+  }
+  return lignes;
+}
+
+function afficherPeriodeActive() {
+  if (!PARAMETRES) return;
+  document.getElementById('periode-active').textContent =
+    `Periode en cours : ${PARAMETRES.Periode_active} ${PARAMETRES.Annee_active}`;
+}
+
+function remplirServices() {
+  const select = document.getElementById('select-service');
+  select.innerHTML = '<option value="">Choisir un service...</option>' +
+    SERVICES.map(s => `<option value="${s.id}">${s.Libelle}</option>`).join('');
+  select.addEventListener('change', () => filtrerEtAfficherListe(select.value));
+}
+
+// ---------------------------------------------------------------
+// Filtrage : lignes SAISIES de la periode active pour le service choisi
+// ---------------------------------------------------------------
+function filtrerEtAfficherListe(serviceId) {
+  ligneSelectionneeId = null;
+  document.getElementById('panel-fiche').innerHTML =
+    '<div class="empty-state">Cliquez sur un indicateur dans la liste pour le saisir</div>';
+
+  if (!serviceId) {
+    saisiesFiltrees = [];
+  } else {
+    const toutesLesSaisies = tableEnLignes(TABLES.saisies);
+    saisiesFiltrees = toutesLesSaisies.filter(l =>
+      l.Est_periode_active && String(l.Service) === String(serviceId)
+    );
+  }
+
+  const compteur = document.getElementById('compteur');
+  const rempli = saisiesFiltrees.filter(l => l.Valeur !== null && l.Valeur !== '' && l.Valeur !== undefined).length;
+  compteur.textContent = `${rempli} / ${saisiesFiltrees.length}`;
+
+  const liste = document.getElementById('liste-indicateurs');
+  if (saisiesFiltrees.length === 0) {
+    liste.innerHTML = '<div class="empty-state">Aucun indicateur a saisir pour ce service sur la periode en cours</div>';
+    return;
+  }
+
+  liste.innerHTML = saisiesFiltrees.map(l => {
+    const classeStatut = classeStatutDot(l);
+    const libelle = l.Indicateur_Libelle || '(libelle indisponible)';
+    return `
+      <div class="item" data-id="${l.id}">
+        <span class="dot ${classeStatut}"></span>
+        <div>
+          <div class="item-texte">${libelle}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  liste.querySelectorAll('.item').forEach(el => {
+    el.addEventListener('click', () => afficherFiche(Number(el.dataset.id)));
+  });
+}
+
+function classeStatutDot(ligne) {
+  const valeurVide = ligne.Valeur === null || ligne.Valeur === '' || ligne.Valeur === undefined;
+  if (valeurVide) return 'attente';
+  if (ligne.Statut === 'Validée' || ligne.Statut === 'Consolidée') return 'ok';
+  return 'partielle';
+}
+
+// ---------------------------------------------------------------
+// Affichage de la fiche de saisie pour une ligne SAISIES
+// ---------------------------------------------------------------
+function afficherFiche(id) {
+  ligneSelectionneeId = id;
+  const ligne = saisiesFiltrees.find(l => l.id === id);
+  if (!ligne) return;
+  statutChoisi = ligne.Statut || null;
+
+  document.querySelectorAll('.item').forEach(el => {
+    el.classList.toggle('actif', Number(el.dataset.id) === id);
+  });
+
+  const alerteData = ligne.DATA_ATE ? `<span class="badge alerte">${ligne.DATA_ATE}</span>` : '';
+  const badgePap = ligne.PAP ? `<span class="badge pap">${ligne.PAP}</span>` : '';
+  const valeurFinale = (ligne.Type_cible === 'DE_Performance' && ligne.Valeur_finale !== null && ligne.Valeur_finale !== '')
+    ? `<div class="valeur-finale">Valeur finale consolidee : <strong>${ligne.Valeur_finale}</strong></div>` : '';
+
+  document.getElementById('panel-fiche').innerHTML = `
+    <div class="fiche">
+      <div class="fiche-entete">
+        <div>
+          <div class="fiche-code">${ligne.Type_cible}</div>
+          <div class="fiche-titre">${ligne.Indicateur_Libelle || ''}</div>
+          <div style="margin-top:8px">${badgePap}${alerteData}</div>
+        </div>
+        <div class="tampon" id="tampon-affiche">${ligne.Statut ? ligne.Statut.toUpperCase() : 'A SAISIR'}</div>
+      </div>
+
+      <div class="champs">
+        <div class="champ">
+          <label>Valeur</label>
+          <input type="text" id="champ-valeur" value="${ligne.Valeur ?? ''}">
+        </div>
+        <div class="champ">
+          <label>Periode</label>
+          <input type="text" value="${ligne.Periode_valeur} ${ligne.Annee}" disabled>
+        </div>
+        <div class="champ pleine-largeur">
+          <label>Commentaire</label>
+          <textarea id="champ-commentaire" rows="2">${ligne.Commentaire ?? ''}</textarea>
+        </div>
+      </div>
+      ${valeurFinale}
+
+      <div class="statuts" id="zone-statuts">
+        ${boutonStatut('Partielle', 'partielle')}
+        ${boutonStatut('Consolidée', 'consolidee')}
+        ${boutonStatut('Validée', 'validee')}
+      </div>
+
+      <div class="pied">
+        <span class="auteur">Derniere saisie : ${ligne.Auteur || '-'} ${ligne.Date_Saisie ? '· ' + new Date(ligne.Date_Saisie * 1000).toLocaleDateString('fr-FR') : ''}</span>
+        <button class="btn-save" id="btn-enregistrer">Enregistrer</button>
+      </div>
+      <div id="zone-message"></div>
+    </div>
+  `;
+
+  document.querySelectorAll('.btn-statut').forEach(btn => {
+    btn.addEventListener('click', () => {
+      statutChoisi = btn.dataset.valeur;
+      document.querySelectorAll('.btn-statut').forEach(b => b.classList.remove('selectionne'));
+      btn.classList.add('selectionne');
+    });
+  });
+
+  document.getElementById('btn-enregistrer').addEventListener('click', enregistrerLigne);
+}
+
+function boutonStatut(valeur, classe) {
+  const selectionne = statutChoisi === valeur ? `selectionne ${classe}` : '';
+  return `<button type="button" class="btn-statut ${selectionne}" data-valeur="${valeur}">${valeur}</button>`;
+}
+
+// ---------------------------------------------------------------
+// Enregistrement : ecriture reelle dans la table SAISIES du document
+// ---------------------------------------------------------------
+async function enregistrerLigne() {
+  if (!ligneSelectionneeId) return;
+  const bouton = document.getElementById('btn-enregistrer');
+  const zoneMessage = document.getElementById('zone-message');
+  bouton.disabled = true;
+
+  const valeur = document.getElementById('champ-valeur').value;
+  const commentaire = document.getElementById('champ-commentaire').value;
+
+  try {
+    await grist.docApi.applyUserActions([
+      ['UpdateRecord', 'SAISIES', ligneSelectionneeId, {
+        Valeur: valeur === '' ? null : Number(valeur),
+        Commentaire: commentaire,
+        Statut: statutChoisi
+      }]
+    ]);
+    zoneMessage.innerHTML = '<div class="message-etat succes">Enregistre</div>';
+    // on recharge les donnees pour rafraichir la liste (statuts, compteur)
+    await chargerDonnees();
+    const serviceId = document.getElementById('select-service').value;
+    filtrerEtAfficherListe(serviceId);
+  } catch (erreur) {
+    zoneMessage.innerHTML = `<div class="message-etat erreur">Erreur : ${erreur.message}</div>`;
+  } finally {
+    bouton.disabled = false;
+  }
+}
+
+chargerDonnees();
+</script>
+
+</body>
+</html>
