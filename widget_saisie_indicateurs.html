@@ -21,6 +21,7 @@
     (ex: https://grist.numerique.gouv.fr/grist-plugin-api.js)
 -->
 <script src="https://grist.numerique.gouv.fr/grist-plugin-api.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <style>
   :root{
@@ -246,6 +247,7 @@
   </div>
   <div class="controls">
     <select id="select-service"><option>Chargement des services...</option></select>
+    <button class="btn-save" id="btn-export-odt" disabled>Exporter en ODT</button>
   </div>
 </header>
 
@@ -338,6 +340,7 @@ function filtrerEtAfficherListe(serviceId) {
   ligneSelectionneeId = null;
   document.getElementById('panel-fiche').innerHTML =
     '<div class="empty-state">Cliquez sur un indicateur dans la liste pour le saisir</div>';
+  document.getElementById('btn-export-odt').disabled = !serviceId;
 
   if (!serviceId) {
     saisiesFiltrees = [];
@@ -489,9 +492,107 @@ async function enregistrerLigne() {
   }
 }
 
+// ---------------------------------------------------------------
+// Export ODT : construction d'un fichier OpenDocument Text a la volee
+// (zip XML via JSZip, aucun serveur externe, tout se passe dans le
+// navigateur)
+// ---------------------------------------------------------------
+function echapperXml(texte) {
+  return String(texte ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function construireContentXml(serviceLabel, periodeLabel, lignes) {
+  const entetes = ['Type', 'Indicateur', 'Periode', 'Valeur', 'Valeur finale', 'Statut', 'Commentaire'];
+
+  const ligneEntete = '<table:table-row>' + entetes.map(e =>
+    `<table:table-cell table:style-name="CelluleEntete"><text:p text:style-name="TexteEntete">${echapperXml(e)}</text:p></table:table-cell>`
+  ).join('') + '</table:table-row>';
+
+  const lignesDonnees = lignes.map(l => {
+    const valeurs = [
+      l.Type_cible || '',
+      l.Indicateur_Libelle || '',
+      `${l.Periode_valeur || ''} ${l.Annee || ''}`,
+      l.Valeur ?? '',
+      (l.Type_cible === 'DE_Performance' ? (l.Valeur_finale ?? '') : ''),
+      l.Statut || 'A saisir',
+      l.Commentaire || ''
+    ];
+    return '<table:table-row>' + valeurs.map(v =>
+      `<table:table-cell table:style-name="Cellule"><text:p text:style-name="TexteCellule">${echapperXml(v)}</text:p></table:table-cell>`
+    ).join('') + '</table:table-row>';
+  }).join('');
+
+  const colonnes = entetes.map(() => '<table:table-column/>').join('');
+  const dateGeneration = new Date().toLocaleDateString('fr-FR');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2">
+<office:automatic-styles>
+<style:style style:name="Titre" style:family="paragraph"><style:text-properties fo:font-size="18pt" fo:font-weight="bold" fo:color="#000091"/></style:style>
+<style:style style:name="SousTitre" style:family="paragraph"><style:text-properties fo:font-size="11pt" fo:color="#6a6a6a"/></style:style>
+<style:style style:name="CelluleEntete" style:family="table-cell"><style:table-cell-properties fo:background-color="#000091" fo:border="0.5pt solid #000000" fo:padding="0.1cm"/></style:style>
+<style:style style:name="TexteEntete" style:family="paragraph"><style:text-properties fo:color="#ffffff" fo:font-weight="bold" fo:font-size="9pt"/></style:style>
+<style:style style:name="Cellule" style:family="table-cell"><style:table-cell-properties fo:border="0.5pt solid #cccccc" fo:padding="0.1cm"/></style:style>
+<style:style style:name="TexteCellule" style:family="paragraph"><style:text-properties fo:font-size="9pt"/></style:style>
+</office:automatic-styles>
+<office:body>
+<office:text>
+<text:p text:style-name="Titre">Indicateurs qualite - performance</text:p>
+<text:p text:style-name="SousTitre">Service : ${echapperXml(serviceLabel)}</text:p>
+<text:p text:style-name="SousTitre">Periode : ${echapperXml(periodeLabel)}</text:p>
+<text:p text:style-name="SousTitre">Genere le ${dateGeneration}</text:p>
+<text:p/>
+<table:table table:name="Indicateurs">
+${colonnes}
+<table:table-header-rows>${ligneEntete}</table:table-header-rows>
+${lignesDonnees}
+</table:table>
+</office:text>
+</office:body>
+</office:document-content>`;
+}
+
+async function exporterODT() {
+  const select = document.getElementById('select-service');
+  const serviceId = select.value;
+  if (!serviceId) return;
+  const serviceLabel = select.options[select.selectedIndex].text;
+  const periodeLabel = PARAMETRES ? `${PARAMETRES.Periode_active} ${PARAMETRES.Annee_active}` : '';
+
+  const contentXml = construireContentXml(serviceLabel, periodeLabel, saisiesFiltrees);
+
+  const manifestXml = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
+<manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.text"/>
+<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>`;
+
+  const zip = new JSZip();
+  zip.file('mimetype', 'application/vnd.oasis.opendocument.text', { compression: 'STORE' });
+  zip.folder('META-INF').file('manifest.xml', manifestXml);
+  zip.file('content.xml', contentXml);
+
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.oasis.opendocument.text' });
+  const url = URL.createObjectURL(blob);
+  const lien = document.createElement('a');
+  lien.href = url;
+  const nomFichier = `indicateurs_${serviceLabel.replace(/[^a-zA-Z0-9]+/g, '_')}_${periodeLabel.replace(/\s+/g, '_')}.odt`;
+  lien.download = nomFichier;
+  document.body.appendChild(lien);
+  lien.click();
+  document.body.removeChild(lien);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('btn-export-odt').addEventListener('click', exporterODT);
+
 chargerDonnees();
 </script>
 
 </body>
 </html>
-<html><head></head><body></body></html>
