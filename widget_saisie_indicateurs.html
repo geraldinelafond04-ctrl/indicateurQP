@@ -459,9 +459,12 @@ function idsPieceJointe(valeurCellule) {
 
 async function urlPieceJointe(id) {
   try {
-    if (!jetonAcces) {
-      jetonAcces = await grist.docApi.getAccessToken({ readOnly: true });
-    }
+    // Le jeton renvoye par getAccessToken() est de courte duree de vie et ne
+    // doit pas etre mis en cache (voir doc officielle Grist : "There is no
+    // caching of tokens"). On en redemande donc un a chaque appel, sinon les
+    // liens generes plus tard dans la session utilisent un jeton perime et
+    // Grist repond "Cannot access attachment".
+    jetonAcces = await grist.docApi.getAccessToken({ readOnly: true });
     return `${jetonAcces.baseUrl}/attachments/${id}/download?auth=${jetonAcces.token}`;
   } catch (e) {
     console.warn('Impossible de recuperer le jeton d\'acces aux pieces jointes :', e);
