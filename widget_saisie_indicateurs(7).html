@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Saisie des indicateurs - Prefecture 04</title>
+
+<!--
+  WIDGET CUSTOM GRIST - volet SAISIE (agents)
+  ---------------------------------------------------------------
+  A DEPLOYER : re-uploader ce fichier sur le depot GitHub (meme nom,
+  ca ecrase), puis dans Grist retirer/rajouter le widget (le simple
+  rechargement de page peut rester sur une version en cache).
+
+  Aucune cle API dans ce fichier : toute la communication passe par
+  grist-plugin-api.js charge depuis l'instance Grist elle-meme.
+
+  ===================================================================
+  A FAIRE COTE GRIST AVANT DE TESTER CETTE VERSION (voir le recap
+  envoye dans le chat pour le detail) :
+  1. Ajouter une colonne Choix "Genre_prefet" dans PARAMETRES,
+     choix possibles : "Préfète", "Préfet".
+  2. Ajouter une colonne Bool (non-formule) "Import_BPATE" dans
+     SAISIES, cochee automatiquement par le futur import trimestriel
+     BPATE (chantier en pause dans une autre conversation).
+  3. Transformer la colonne SAISIES.Statut en formule (coller le
+     code Python fourni a part).
+  4. Verifier que le nom de methode grist.docApi.getAccessToken
+     existe bien sur votre version de grist-plugin-api.js (utilise
+     ci-dessous pour afficher les pieces jointes) : sinon, remplacer
+     par l'equivalent documente sur votre instance.
+  ===================================================================
+-->
+<script src="https://grist.numerique.gouv.fr/grist-plugin-api.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+  :root{
+    --bleu: #000091;
+    --bleu-clair: #E5E5F4;
+    --rouge: #E1000F;
+    --vert: #18753C;
+    --vert-clair: #E8F5EC;
+    --orange: #B34000;
+    --orange-clair: #FDEEE5;
+    --jaune: #716043;
+    --jaune-clair: #FEF6E3;
+    --gris-fond: #F6F6F6;
+    --gris-bordure: #DDDDDD;
+    --texte: #1E1E1E;
+    --texte-secondaire: #6A6A6A;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family:-apple-system,"Segoe UI",Arial,sans-serif;
+    background:var(--gris-fond);
+    color:var(--texte);
+    font-size:14px;
+  }
+  header{
+    background:var(--bleu);
+    color:#fff;
+    padding:12px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:14px;
+  }
+  .entete-gauche{
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  .img-cartouche{
+    height:46px;
+    width:auto;
+    background:#fff;
+    border-radius:4px;
+    padding:2px;
+  }
+  header h1{
+    font-size:16px;
+    font-weight:600;
+    margin:0;
+  }
+  header .sub{
+    font-size:12px;
+    opacity:.85;
+    margin-top:2px;
+  }
+  .controls{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  select, .select-mini{
+    padding:6px 10px;
+    border-radius:4px;
+    border:none;
+    font-size:13px;
+  }
+  .layout{
+    display:grid;
+    grid-template-columns:300px 1fr;
+    gap:16px;
+    padding:16px;
+    align-items:start;
+  }
+  .panel{
+    background:#fff;
+    border:1px solid var(--gris-bordure);
+    border-radius:8px;
+  }
+  .panel-header{
+    padding:12px 14px;
+    border-bottom:1px solid var(--gris-bordure);
+    font-weight:600;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .progress{
+    font-weight:400;
+    font-size:12px;
+    color:var(--texte-secondaire);
+  }
+  .legende-codes{
+    padding:12px 14px;
+    border-bottom:1px solid var(--gris-bordure);
+    font-size:11.5px;
+    color:var(--texte-secondaire);
+    line-height:1.6;
+  }
+  .legende-codes b{color:var(--texte)}
+  .liste{
+    max-height:56vh;
+    overflow-y:auto;
+  }
+  .item{
+    padding:10px 14px;
+    border-bottom:1px solid #f0f0f0;
+    cursor:pointer;
+    display:flex;
+    align-items:flex-start;
+    gap:8px;
+  }
+  .item:hover{background:var(--gris-fond)}
+  .item.actif{background:var(--bleu-clair)}
+  .dot{
+    width:9px;height:9px;border-radius:50%;
+    margin-top:4px;flex-shrink:0;
+  }
+  .dot.attente{background:var(--rouge)}
+  .dot.encours{background:var(--orange)}
+  .dot.ok{background:var(--vert)}
+  .item-texte{font-size:13px;line-height:1.3}
+  .item-mois{font-size:10.5px;color:var(--texte-secondaire);margin-top:2px}
+  .empty-state{
+    padding:30px 16px;
+    text-align:center;
+    color:var(--texte-secondaire);
+    font-size:13px;
+  }
+  .fiche{padding:20px}
+  .fiche-entete{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:14px;
+    gap:12px;
+  }
+  .fiche-code{font-size:12px;color:var(--texte-secondaire)}
+  .fiche-titre{font-size:17px;font-weight:600;margin:4px 0 0}
+  .badge{
+    display:inline-block;
+    font-size:11px;
+    font-weight:600;
+    padding:3px 8px;
+    border-radius:4px;
+    margin-right:6px;
+    margin-bottom:6px;
+  }
+  .badge.pap{background:var(--bleu-clair);color:var(--bleu)}
+  .badge.alerte{background:var(--orange-clair);color:var(--orange)}
+  .badge.info{background:var(--jaune-clair);color:var(--jaune)}
+  .lien-fiche{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    font-size:12.5px;
+    color:var(--bleu);
+    text-decoration:none;
+    border:1px solid var(--bleu-clair);
+    background:var(--bleu-clair);
+    padding:5px 10px;
+    border-radius:5px;
+    margin-bottom:10px;
+  }
+  .lien-fiche:hover{text-decoration:underline}
+
+  .info-bulle{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:14px;height:14px;
+    border-radius:50%;
+    background:var(--gris-bordure);
+    color:#555;
+    font-size:10px;
+    font-weight:700;
+    margin-left:5px;
+    cursor:help;
+    position:relative;
+  }
+  .info-bulle:hover .bulle-texte{display:block}
+  .bulle-texte{
+    display:none;
+    position:absolute;
+    z-index:20;
+    bottom:20px;
+    left:0;
+    width:240px;
+    background:#262626;
+    color:#fff;
+    font-size:11.5px;
+    font-weight:400;
+    line-height:1.4;
+    padding:8px 10px;
+    border-radius:6px;
+    box-shadow:0 4px 10px rgba(0,0,0,.2);
+  }
+
+  table.lignes-periode{width:100%;border-collapse:collapse;margin-bottom:14px}
+  table.lignes-periode th{
+    text-align:left;font-size:11.5px;color:var(--texte-secondaire);
+    padding:6px 8px;border-bottom:1px solid var(--gris-bordure);font-weight:600;
+  }
+  table.lignes-periode td{padding:7px 8px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+  table.lignes-periode input, table.lignes-periode textarea{
+    width:100%;padding:6px 8px;border:1px solid var(--gris-bordure);
+    border-radius:4px;font-size:13px;font-family:inherit;
+  }
+  .tampon-ligne{
+    font-size:10.5px;font-weight:700;letter-spacing:.3px;
+    padding:3px 8px;border-radius:12px;white-space:nowrap;
+    border:1px solid var(--gris-bordure);color:var(--texte-secondaire);
+  }
+  .tampon-ligne.encours{border-color:var(--orange);color:var(--orange);background:var(--orange-clair)}
+  .tampon-ligne.consolidee{border-color:var(--bleu);color:var(--bleu);background:var(--bleu-clair)}
+  .tampon-ligne.fiabilisee{border-color:var(--vert);color:var(--vert);background:var(--vert-clair)}
+  .tampon-ligne.attente{border-color:var(--gris-bordure);color:var(--texte-secondaire)}
+
+  .valeur-finale{font-size:12px;color:var(--texte-secondaire);margin:-4px 0 12px}
+
+  .pied{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    border-top:1px solid var(--gris-bordure);
+    padding-top:14px;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .auteur{font-size:12px;color:var(--texte-secondaire)}
+  .btn{
+    background:var(--bleu);
+    color:#fff;
+    border:none;
+    padding:9px 18px;
+    border-radius:6px;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .btn.secondaire{background:#fff;color:var(--bleu);border:1px solid var(--bleu)}
+  .btn:hover{opacity:.9}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .message-etat{
+    font-size:12px;
+    margin-top:10px;
+    padding:8px 10px;
+    border-radius:4px;
+  }
+  .message-etat.succes{background:var(--vert-clair);color:var(--vert)}
+  .message-etat.erreur{background:var(--orange-clair);color:var(--orange)}
+
+  .bloc-historique{margin-top:22px;border-top:1px solid var(--gris-bordure);padding-top:16px}
+  .bloc-historique h3{font-size:13px;margin:0 0 10px}
+  .histo-grille{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:780px){.histo-grille{grid-template-columns:1fr}}
+  .histo-tableau{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px}
+  .histo-tableau th,.histo-tableau td{padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:left}
+  .histo-vide{font-size:12px;color:var(--texte-secondaire);font-style:italic}
+
+  /* Modale export */
+  .voile{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50}
+  .modale{background:#fff;border-radius:10px;max-width:560px;width:92%;max-height:86vh;overflow-y:auto;padding:20px}
+  .modale h2{font-size:15px;margin:0 0 14px}
+  .modale-section{margin-bottom:16px}
+  .modale-section label{display:block;font-size:12px;color:var(--texte-secondaire);margin-bottom:6px;font-weight:600}
+  .liste-check{max-height:160px;overflow-y:auto;border:1px solid var(--gris-bordure);border-radius:6px;padding:8px}
+  .ligne-check{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0}
+  .modale-pied{display:flex;justify-content:flex-end;gap:10px;margin-top:10px}
+  .radio-ligne{display:flex;gap:16px;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="entete-gauche">
+    <div id="bloc-prefet"></div>
+    <div>
+      <h1 id="titre-cartouche">Indicateurs qualite - performance</h1>
+      <div class="sub" id="periode-active">Periode en cours : chargement...</div>
+    </div>
+  </div>
+  <div class="controls">
+    <select id="select-genre-prefet" class="select-mini" style="display:none">
+      <option value="Préfète">Bloc Préfète</option>
+      <option value="Préfet">Bloc Préfet</option>
+    </select>
+    <select id="select-service"><option>Chargement des services...</option></select>
+    <button class="btn secondaire" id="btn-ouvrir-export" disabled>Exporter mes données</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="panel">
+    <div class="legende-codes">
+      <div><b>IM</b> : indicateur métier — Performance</div>
+      <div><b>IF</b> : indicateur fonction support — Performance</div>
+      <div><b>QO</b> : indicateur Qualité Obligatoire (référentiel Quali-ATE)</div>
+      <div><b>QF</b> : indicateur Qualité local, facultatif au regard du référentiel mais saisie obligatoire</div>
+    </div>
+    <div class="panel-header">
+      <span>A saisir</span>
+      <span class="progress" id="compteur">0 / 0</span>
+    </div>
+    <div class="liste" id="liste-indicateurs">
+      <div class="empty-state">Selectionnez un service</div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-fiche">
+    <div class="empty-state">Cliquez sur un indicateur dans la liste pour le saisir</div>
+  </div>
+</div>
+
+<div id="zone-modale"></div>
+
+<script>
+// ---------------------------------------------------------------
+// Etat global
+// ---------------------------------------------------------------
+let TABLES = {};
+let SERVICES = [];
+let PARAMETRES = null;
+let groupesFiltres = [];   // groupes d'indicateurs/DE pour le service + periode actifs
+let groupeSelectionne = null;
+let jetonAcces = null;
+
+const MOIS_ORDRE = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+// Textes des infobulles : copies depuis les descriptions de colonnes du
+// document Grist (figes ici plutot que rappeles dynamiquement, plus robuste)
+const INFOBULLES = {
+  valeur: "Il s'agit de la valeur brute pour cette donnée, cette période et votre service. En cas de doute, l'unité est précisée dans la fiche technique téléchargeable.",
+  statut: "Reflète l'état de la ligne dans le cycle de vie de la donnée : en cours de saisie, consolidée (cas multi-services comme le DCL) ou fiabilisée (conforme au tableau transmis par le BPATE). Ce champ se met à jour automatiquement, il n'y a rien à choisir.",
+  commentaire: "Indiquez les actions engagées, difficultés rencontrées, progrès réalisés. Ces informations sont utiles pour contextualiser le résultat lors des remontées au SGAR et au ministère.",
+  pap: "Signale un indicateur particulièrement scruté par le ministère dans le cadre du projet annuel de performance (PAP) du P354.",
+  dataAte: "Si cette donnée nécessite d'être saisie dans l'application DATA-ATE, un message d'alerte s'affiche : pensez à la saisir aussi là-bas.",
+  transmisBpate: "Cette donnée est transmise par la direction métier via BPATE. Vous pouvez saisir votre propre valeur pour comparaison, mais la donnée finale retenue sera celle de la direction métier.",
+  valeurFinale: "Valeur retenue au final pour l'indicateur. Pour les indicateurs partagés entre plusieurs services (consolidation DCL), elle est calculée à partir des valeurs de tous les bureaux concernés et peut différer de votre saisie individuelle."
+};
+
+grist.ready({ requiredAccess: 'full' });
+
+// ---------------------------------------------------------------
+// Chargement des donnees
+// ---------------------------------------------------------------
+async function chargerDonnees() {
+  const [saisies, services, parametres, indicPerf, donneesElem, indicQualite,
+         donneesElemQualite, deDcl, indicateurDe2, resultatsIndicateurs,
+         cartouche] = await Promise.all([
+    grist.docApi.fetchTable('SAISIES'),
+    grist.docApi.fetchTable('SERVICES'),
+    grist.docApi.fetchTable('PARAMETRES'),
+    grist.docApi.fetchTable('Indicateurs_Performance_2026'),
+    grist.docApi.fetchTable('Donnees_elementaires'),
+    grist.docApi.fetchTable('Indicateurs_Qualite'),
+    grist.docApi.fetchTable('Donnees_elementaires_Qualite'),
+    grist.docApi.fetchTable('DE_DCL'),
+    grist.docApi.fetchTable('INDICATEUR_DE2'),
+    grist.docApi.fetchTable('RESULTATS_INDICATEURS'),
+    grist.docApi.fetchTable('CARTOUCHE_INFO')
+  ]);
+
+  TABLES = {
+    saisies: tableEnLignes(saisies),
+    indicPerf: tableEnLignes(indicPerf),
+    donneesElem: tableEnLignes(donneesElem),
+    indicQualite: tableEnLignes(indicQualite),
+    donneesElemQualite: tableEnLignes(donneesElemQualite),
+    deDcl: tableEnLignes(deDcl),
+    indicateurDe2: tableEnLignes(indicateurDe2),
+    resultatsIndicateurs: tableEnLignes(resultatsIndicateurs),
+    cartouche: tableEnLignes(cartouche)
+  };
+  // Note : SERVICES.Actif est une formule vide dans ce document (toujours
+  // fausse) -> on ne filtre pas dessus tant qu'elle n'est pas programmee.
+  SERVICES = tableEnLignes(services);
+  PARAMETRES = tableEnLignes(parametres)[0] || null;
+
+  remplirServices();
+  afficherPeriodeActive();
+  await afficherBlocPrefet();
+}
+
+function tableEnLignes(table) {
+  const lignes = [];
+  const nb = table.id.length;
+  for (let i = 0; i < nb; i++) {
+    const ligne = { id: table.id[i] };
+    for (const col in table) {
+      if (col === 'id') continue;
+      ligne[col] = table[col][i];
+    }
+    lignes.push(ligne);
+  }
+  return lignes;
+}
+
+function afficherPeriodeActive() {
+  if (!PARAMETRES) return;
+  document.getElementById('periode-active').textContent =
+    `Periode en cours : ${PARAMETRES.Periode_active} ${PARAMETRES.Annee_active}`;
+}
+
+function remplirServices() {
+  const select = document.getElementById('select-service');
+  select.innerHTML = '<option value="">Choisir un service...</option>' +
+    SERVICES.map(s => `<option value="${s.id}">${s.Libelle}</option>`).join('');
+  select.addEventListener('change', () => filtrerEtAfficherListe(select.value));
+}
+
+// ---------------------------------------------------------------
+// Pieces jointes : construction d'une URL de telechargement via un
+// jeton d'acces temporaire (aucune cle API stockee dans le widget)
+// ---------------------------------------------------------------
+function idsPieceJointe(valeurCellule) {
+  // Une colonne Attachments Grist encode ses valeurs comme une liste,
+  // parfois prefixee par "L" selon la version de l'API. On gere les
+  // deux cas.
+  if (Array.isArray(valeurCellule)) {
+    if (valeurCellule[0] === 'L') return valeurCellule.slice(1);
+    return valeurCellule;
+  }
+  return [];
+}
+
+async function urlPieceJointe(id) {
+  try {
+    if (!jetonAcces) {
+      jetonAcces = await grist.docApi.getAccessToken({ readOnly: true });
+    }
+    return `${jetonAcces.baseUrl}/attachments/${id}/download?auth=${jetonAcces.token}`;
+  } catch (e) {
+    console.warn('Impossible de recuperer le jeton d\'acces aux pieces jointes :', e);
+    return '';
+  }
+}
+
+// recupere l'image en base64 (utile pour l'inserer dans un PDF)
+async function pieceJointeEnBase64(id) {
+  const url = await urlPieceJointe(id);
+  if (!url) return null;
+  const reponse = await fetch(url);
+  const blob = await reponse.blob();
+  return new Promise(resolve => {
+    const lecteur = new FileReader();
+    lecteur.onloadend = () => resolve(lecteur.result);
+    lecteur.readAsDataURL(blob);
+  });
+}
+
+// ---------------------------------------------------------------
+// Bloc prefete / prefet (haut a gauche)
+// ---------------------------------------------------------------
+async function afficherBlocPrefet() {
+  const conteneur = document.getElementById('bloc-prefet');
+  const selectGenre = document.getElementById('select-genre-prefet');
+  const cartouche = TABLES.cartouche[0];
+  if (!cartouche) { conteneur.innerHTML = ''; return; }
+
+  document.getElementById('titre-cartouche').textContent = cartouche.TITRE || 'Indicateurs qualite - performance';
+
+  const ids = idsPieceJointe(cartouche.BLOC_PREFETE);
+  if (ids.length === 0) { conteneur.innerHTML = ''; return; }
+
+  if (ids.length > 1) {
+    // Deux visuels disponibles (prefete / prefet) -> selecteur pilote
+    // par PARAMETRES.Genre_prefet. A creer cote Grist si absent.
+    selectGenre.style.display = '';
+    const genre = (PARAMETRES && PARAMETRES.Genre_prefet) || 'Préfète';
+    selectGenre.value = genre;
+  } else {
+    selectGenre.style.display = 'none';
+  }
+
+  const indice = (ids.length > 1 && PARAMETRES && PARAMETRES.Genre_prefet === 'Préfet') ? 1 : 0;
+  const url = await urlPieceJointe(ids[Math.min(indice, ids.length - 1)]);
+  conteneur.innerHTML = url ? `<img src="${url}" class="img-cartouche" alt="Bloc prefete/prefet">` : '';
+}
+
+document.getElementById('select-genre-prefet').addEventListener('change', async (e) => {
+  try {
+    await grist.docApi.applyUserActions([
+      ['UpdateRecord', 'PARAMETRES', PARAMETRES.id, { Genre_prefet: e.target.value }]
+    ]);
+    PARAMETRES.Genre_prefet = e.target.value;
+    await afficherBlocPrefet();
+  } catch (err) {
+    console.warn('Colonne PARAMETRES.Genre_prefet introuvable ou non modifiable :', err);
+  }
+});
+
+// ---------------------------------------------------------------
+// Regroupement des lignes SAISIES par indicateur/DE (pour afficher
+// les donnees mensuelles - jusqu'a 3 lignes - sur une seule fiche)
+// ---------------------------------------------------------------
+function clefRegroupement(l) {
+  if (l.Type_cible === 'DE_Performance') return 'DEP-' + l.Ref_DE_Performance;
+  if (l.Type_cible === 'DE_Qualite') return 'DEQ-' + l.Ref_DE_Qualite;
+  return 'IQ-' + l.Ref_Indicateur_Qualite;
+}
+
+function construireGroupes(lignes) {
+  const carte = new Map();
+  lignes.forEach(l => {
+    const clef = clefRegroupement(l);
+    if (!carte.has(clef)) carte.set(clef, []);
+    carte.get(clef).push(l);
+  });
+  return Array.from(carte.values()).map(groupe => {
+    groupe.sort((a, b) => MOIS_ORDRE.indexOf(a.Periode_valeur) - MOIS_ORDRE.indexOf(b.Periode_valeur));
+    return groupe;
+  });
+}
+
+function statutDuGroupe(groupe) {
+  const auMoinsUneVide = groupe.some(l => estVide(l.Valeur));
+  if (auMoinsUneVide) return 'attente';
+  const tousFiabilises = groupe.every(l => l.Statut === 'Fiabilisée BPATE');
+  if (tousFiabilises) return 'ok';
+  return 'encours';
+}
+
+function estVide(v) {
+  return v === null || v === '' || v === undefined;
+}
+
+// ---------------------------------------------------------------
+// Filtrage : lignes SAISIES de la periode active pour le service choisi
+// ---------------------------------------------------------------
+function filtrerEtAfficherListe(serviceId) {
+  groupeSelectionne = null;
+  document.getElementById('panel-fiche').innerHTML =
+    '<div class="empty-state">Cliquez sur un indicateur dans la liste pour le saisir</div>';
+  document.getElementById('btn-ouvrir-export').disabled = !serviceId;
+
+  if (!serviceId) {
+    groupesFiltres = [];
+  } else {
+    const lignesActives = TABLES.saisies.filter(l =>
+      l.Est_periode_active && String(l.Service) === String(serviceId)
+    );
+    groupesFiltres = construireGroupes(lignesActives);
+  }
+
+  const compteur = document.getElementById('compteur');
+  const rempli = groupesFiltres.filter(g => g.every(l => !estVide(l.Valeur))).length;
+  compteur.textContent = `${rempli} / ${groupesFiltres.length}`;
+
+  const liste = document.getElementById('liste-indicateurs');
+  if (groupesFiltres.length === 0) {
+    liste.innerHTML = '<div class="empty-state">Aucun indicateur a saisir pour ce service sur la periode en cours</div>';
+    return;
+  }
+
+  liste.innerHTML = groupesFiltres.map((groupe, index) => {
+    const premiere = groupe[0];
+    const libelle = premiere.Indicateur_Libelle || '(libelle indisponible)';
+    const mois = groupe.length > 1 ? `<div class="item-mois">${groupe.map(l => l.Periode_valeur).join(' · ')}</div>` : '';
+    return `
+      <div class="item" data-index="${index}">
+        <span class="dot ${statutDuGroupe(groupe)}"></span>
+        <div>
+          <div class="item-texte">${libelle}</div>
+          ${mois}
+        </div>
+      </div>`;
+  }).join('');
+
+  liste.querySelectorAll('.item').forEach(el => {
+    el.addEventListener('click', () => afficherFiche(Number(el.dataset.index)));
+  });
+}
+
+// ---------------------------------------------------------------
+// Fiche de saisie (1 a 3 lignes selon periodicite)
+// ---------------------------------------------------------------
+function libelleTampon(statut) {
+  if (statut === 'Fiabilisée BPATE') return { classe: 'fiabilisee', texte: 'FIABILISÉE' };
+  if (statut === 'Consolidée') return { classe: 'consolidee', texte: 'CONSOLIDÉE' };
+  if (statut === 'En cours de saisie') return { classe: 'encours', texte: 'EN COURS' };
+  return { classe: 'attente', texte: 'À SAISIR' };
+}
+
+function infoBulle(texte) {
+  return `<span class="info-bulle">i<span class="bulle-texte">${texte}</span></span>`;
+}
+
+async function afficherFiche(index) {
+  groupeSelectionne = index;
+  const groupe = groupesFiltres[index];
+  if (!groupe) return;
+  const premiere = groupe[0];
+
+  document.querySelectorAll('.item').forEach(el => {
+    el.classList.toggle('actif', Number(el.dataset.index) === index);
+  });
+
+  const alerteData = premiere.DATA_ATE ? `<span class="badge alerte">${premiere.DATA_ATE}${infoBulle(INFOBULLES.dataAte)}</span>` : '';
+  const badgePap = premiere.PAP ? `<span class="badge pap">${premiere.PAP}${infoBulle(INFOBULLES.pap)}</span>` : '';
+  const infoBpate = premiere.Donnee_transmise_par_la_direction_metier
+    ? `<span class="badge info">${premiere.Donnee_transmise_par_la_direction_metier}${infoBulle(INFOBULLES.transmisBpate)}</span>` : '';
+
+  const idsFiche = idsPieceJointe(premiere.Fiche_indicateur);
+  let lienFiche = '';
+  if (idsFiche.length > 0) {
+    const url = await urlPieceJointe(idsFiche[0]);
+    lienFiche = url ? `<a class="lien-fiche" href="${url}" target="_blank" rel="noopener">📄 Fiche technique</a>` : '';
+  } else if (premiere.Fiche_message) {
+    lienFiche = `<div style="font-size:12px;color:var(--texte-secondaire);margin-bottom:10px">${premiere.Fiche_message}</div>`;
+  }
+
+  const afficherValeurFinale = premiere.Type_cible === 'DE_Performance' &&
+    groupe.some(l => l.Valeur_finale !== null && l.Valeur_finale !== '' && Number(l.Valeur_finale) !== Number(l.Valeur));
+
+  const lignesTableau = groupe.map(l => {
+    const tampon = libelleTampon(l.Statut);
+    const valeurFinaleLigne = (afficherValeurFinale && l.Valeur_finale !== null && l.Valeur_finale !== '')
+      ? `<div class="valeur-finale">Valeur finale : <strong>${l.Valeur_finale}</strong></div>` : '';
+    const lectureSeule = l.Statut === 'Fiabilisée BPATE';
+    return `
+      <tr data-ligne-id="${l.id}">
+        <td>${l.Periode_valeur} ${l.Annee}</td>
+        <td>
+          <input type="text" class="champ-valeur" value="${l.Valeur ?? ''}" ${lectureSeule ? 'disabled' : ''}>
+          ${valeurFinaleLigne}
+        </td>
+        <td><span class="tampon-ligne ${tampon.classe}">${tampon.texte}</span></td>
+        <td><textarea class="champ-commentaire" rows="1" ${lectureSeule ? 'disabled' : ''}>${l.Commentaire ?? ''}</textarea></td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('panel-fiche').innerHTML = `
+    <div class="fiche">
+      <div class="fiche-entete">
+        <div>
+          <div class="fiche-code">${premiere.Type_cible}</div>
+          <div class="fiche-titre">${premiere.Indicateur_Libelle || ''}</div>
+        </div>
+      </div>
+      <div style="margin-bottom:10px">${badgePap}${alerteData}${infoBpate}</div>
+      ${lienFiche}
+
+      <table class="lignes-periode">
+        <thead>
+          <tr>
+            <th>Période</th>
+            <th>Valeur ${infoBulle(INFOBULLES.valeur)}</th>
+            <th>Statut ${infoBulle(INFOBULLES.statut)}</th>
+            <th>Commentaire ${infoBulle(INFOBULLES.commentaire)}</th>
+          </tr>
+        </thead>
+        <tbody>${lignesTableau}</tbody>
+      </table>
+
+      <div class="pied">
+        <span class="auteur">Dernière saisie : ${premiere.Auteur || '-'} ${premiere.Date_Saisie ? '· ' + new Date(premiere.Date_Saisie * 1000).toLocaleDateString('fr-FR') : ''}</span>
+        <button class="btn" id="btn-enregistrer">Enregistrer</button>
+      </div>
+      <div id="zone-message"></div>
+
+      <div class="bloc-historique">
+        <h3>Historique de la donnée (12 derniers mois)</h3>
+        <div id="histo-donnee"><div class="histo-vide">Chargement...</div></div>
+        ${premiere.Type_cible === 'DE_Performance' ? `
+        <h3 style="margin-top:16px">Historique de l'indicateur associé (12 derniers mois)</h3>
+        <div id="histo-indicateur"><div class="histo-vide">Chargement...</div></div>` : ''}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btn-enregistrer').addEventListener('click', () => enregistrerGroupe(groupe));
+  afficherHistoriqueDonnee(premiere);
+  if (premiere.Type_cible === 'DE_Performance') afficherHistoriqueIndicateur(premiere);
+}
+
+// ---------------------------------------------------------------
+// Enregistrement d'un groupe (1 a 3 lignes)
+// Le Statut n'est plus ecrit par le widget : c'est desormais une
+// formule Grist (voir instructions en tete de fichier). On se
+// contente d'ecrire Valeur et Commentaire.
+// ---------------------------------------------------------------
+async function enregistrerGroupe(groupe) {
+  const bouton = document.getElementById('btn-enregistrer');
+  const zoneMessage = document.getElementById('zone-message');
+  bouton.disabled = true;
+
+  const actions = [];
+  document.querySelectorAll('#panel-fiche tr[data-ligne-id]').forEach(tr => {
+    const ligneId = Number(tr.dataset.ligneId);
+    const champValeur = tr.querySelector('.champ-valeur');
+    const champCommentaire = tr.querySelector('.champ-commentaire');
+    if (champValeur.disabled) return; // ligne fiabilisee BPATE : non modifiable
+    const valeur = champValeur.value;
+    const commentaire = champCommentaire.value;
+    actions.push(['UpdateRecord', 'SAISIES', ligneId, {
+      Valeur: valeur === '' ? null : Number(valeur),
+      Commentaire: commentaire
+    }]);
+  });
+
+  if (actions.length === 0) {
+    zoneMessage.innerHTML = '<div class="message-etat erreur">Aucune ligne modifiable dans ce groupe (deja fiabilisee).</div>';
+    bouton.disabled = false;
+    return;
+  }
+
+  try {
+    await grist.docApi.applyUserActions(actions);
+    zoneMessage.innerHTML = '<div class="message-etat succes">Enregistré</div>';
+    await chargerDonnees();
+    const serviceId = document.getElementById('select-service').value;
+    filtrerEtAfficherListe(serviceId);
+  } catch (erreur) {
+    zoneMessage.innerHTML = `<div class="message-etat erreur">Erreur : ${erreur.message}</div>`;
+  } finally {
+    bouton.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------
+// Historique : tableau + petit graphe SVG (pas de dependance externe)
+// Fenetre : 1 an glissant.
+// ---------------------------------------------------------------
+function ilYAUnAn() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  return d;
+}
+
+// Comparaison grossiere de periode (Annee + rang du mois/trimestre) pour
+// filtrer les 12 derniers mois sans avoir besoin d'une vraie date Grist.
+function periodeRecente(annee, periodeValeur) {
+  const limite = ilYAUnAn();
+  const anneeLimite = limite.getFullYear();
+  if (annee > anneeLimite) return true;
+  if (annee < anneeLimite) return false;
+  return true; // meme annee que la limite : on garde (approximation raisonnable)
+}
+
+function dessinerMiniGraphe(valeurs) {
+  if (valeurs.length === 0) return '';
+  const max = Math.max(...valeurs, 1);
+  const largeurBarre = 24;
+  const largeur = valeurs.length * (largeurBarre + 6);
+  const hauteur = 60;
+  const barres = valeurs.map((v, i) => {
+    const h = Math.max(2, (v / max) * (hauteur - 6));
+    const x = i * (largeurBarre + 6);
+    const y = hauteur - h;
+    return `<rect x="${x}" y="${y}" width="${largeurBarre}" height="${h}" fill="#000091" rx="2"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${largeur} ${hauteur}" width="${largeur}" height="${hauteur}">${barres}</svg>`;
+}
+
+function afficherHistoriqueDonnee(ligne) {
+  const conteneur = document.getElementById('histo-donnee');
+  let lignesHisto = [];
+  if (ligne.Type_cible === 'DE_Performance') {
+    lignesHisto = TABLES.saisies.filter(l =>
+      l.Ref_DE_Performance === ligne.Ref_DE_Performance &&
+      l.Service === ligne.Service &&
+      l.Statut === 'Fiabilisée BPATE' &&
+      periodeRecente(l.Annee, l.Periode_valeur)
+    );
+  } else if (ligne.Type_cible === 'DE_Qualite') {
+    lignesHisto = TABLES.saisies.filter(l =>
+      l.Ref_DE_Qualite === ligne.Ref_DE_Qualite &&
+      l.Service === ligne.Service &&
+      l.Statut === 'Fiabilisée BPATE' &&
+      periodeRecente(l.Annee, l.Periode_valeur)
+    );
+  } else {
+    lignesHisto = TABLES.saisies.filter(l =>
+      l.Ref_Indicateur_Qualite === ligne.Ref_Indicateur_Qualite &&
+      l.Service === ligne.Service &&
+      l.Statut === 'Fiabilisée BPATE' &&
+      periodeRecente(l.Annee, l.Periode_valeur)
+    );
+  }
+
+  if (lignesHisto.length === 0) {
+    conteneur.innerHTML = '<div class="histo-vide">Pas encore de valeur fiabilisée sur les 12 derniers mois.</div>';
+    return;
+  }
+
+  lignesHisto.sort((a, b) => a.Annee - b.Annee || MOIS_ORDRE.indexOf(a.Periode_valeur) - MOIS_ORDRE.indexOf(b.Periode_valeur));
+  const tableau = `<table class="histo-tableau"><thead><tr><th>Période</th><th>Valeur</th></tr></thead><tbody>
+    ${lignesHisto.map(l => `<tr><td>${l.Periode_valeur} ${l.Annee}</td><td>${l.Valeur}</td></tr>`).join('')}
+  </tbody></table>`;
+  const graphe = dessinerMiniGraphe(lignesHisto.map(l => Number(l.Valeur) || 0));
+  conteneur.innerHTML = tableau + graphe;
+}
+
+function afficherHistoriqueIndicateur(ligne) {
+  const conteneur = document.getElementById('histo-indicateur');
+  const liens = TABLES.indicateurDe2.filter(l => l.Donnee_elementaire === ligne.Ref_DE_Performance);
+  if (liens.length === 0) {
+    conteneur.innerHTML = '<div class="histo-vide">Cette donnée n\'est pas encore rattachée à un indicateur (INDICATEUR_DE2).</div>';
+    return;
+  }
+  const indicateurId = liens[0].Indicateur;
+  const resultats = TABLES.resultatsIndicateurs.filter(r =>
+    r.Indicateur_Performance === indicateurId && periodeRecente(r.Annee, r.Periode_valeur)
+  );
+  if (resultats.length === 0) {
+    conteneur.innerHTML = '<div class="histo-vide">Pas encore de résultat consolidé sur les 12 derniers mois.</div>';
+    return;
+  }
+  resultats.sort((a, b) => a.Annee - b.Annee);
+  const tableau = `<table class="histo-tableau"><thead><tr><th>Période</th><th>Valeur</th><th>Statut</th></tr></thead><tbody>
+    ${resultats.map(r => `<tr><td>${r.Periode_valeur} ${r.Annee}</td><td>${r.Valeur}</td><td>${r.Statut || ''}</td></tr>`).join('')}
+  </tbody></table>`;
+  const graphe = dessinerMiniGraphe(resultats.map(r => Number(r.Valeur) || 0));
+  conteneur.innerHTML = tableau + graphe;
+}
+
+// ---------------------------------------------------------------
+// EXPORT : modale de selection puis generation ODS + PDF
+// ---------------------------------------------------------------
+function ouvrirModaleExport() {
+  const serviceId = document.getElementById('select-service').value;
+  if (!serviceId) return;
+
+  document.getElementById('zone-modale').innerHTML = `
+    <div class="voile" id="voile-export">
+      <div class="modale">
+        <h2>Exporter mes données</h2>
+
+        <div class="modale-section">
+          <label>Données à exporter</label>
+          <div class="liste-check" id="check-donnees">
+            ${groupesFiltres.map((g, i) => `
+              <label class="ligne-check">
+                <input type="checkbox" value="${i}" checked>
+                ${g[0].Indicateur_Libelle || '(libellé indisponible)'}
+              </label>`).join('')}
+          </div>
+        </div>
+
+        <div class="modale-section">
+          <label>Période</label>
+          <div>${PARAMETRES ? PARAMETRES.Periode_active + ' ' + PARAMETRES.Annee_active : ''} (période en cours)</div>
+        </div>
+
+        <div class="modale-section">
+          <label>Format</label>
+          <div class="radio-ligne">
+            <label><input type="radio" name="format-export" value="ods" checked> ODS (tableur)</label>
+            <label><input type="radio" name="format-export" value="pdf"> PDF</label>
+          </div>
+        </div>
+
+        <div class="modale-pied">
+          <button class="btn secondaire" id="btn-annuler-export">Annuler</button>
+          <button class="btn" id="btn-generer-export">Générer</button>
+        </div>
+        <div id="message-export"></div>
+      </div>
+    </div>`;
+
+  document.getElementById('btn-annuler-export').addEventListener('click', fermerModaleExport);
+  document.getElementById('voile-export').addEventListener('click', (e) => {
+    if (e.target.id === 'voile-export') fermerModaleExport();
+  });
+  document.getElementById('btn-generer-export').addEventListener('click', genererExport);
+}
+
+function fermerModaleExport() {
+  document.getElementById('zone-modale').innerHTML = '';
+}
+
+function echapperXml(texte) {
+  return String(texte ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function genererExport() {
+  const messageExport = document.getElementById('message-export');
+  const indicesChoisis = Array.from(document.querySelectorAll('#check-donnees input:checked')).map(c => Number(c.value));
+  const groupesChoisis = indicesChoisis.map(i => groupesFiltres[i]).filter(Boolean);
+
+  if (groupesChoisis.length === 0) {
+    messageExport.innerHTML = '<div class="message-etat erreur">Sélectionnez au moins une donnée.</div>';
+    return;
+  }
+
+  // Lignes "service" : une ligne par SAISIES du groupe choisi
+  const lignesService = groupesChoisis.flatMap(g => g.map(l => ({
+    territoire: 'Préfecture 04 (mon service)',
+    indicateur: l.Indicateur_Libelle,
+    periode: `${l.Periode_valeur} ${l.Annee}`,
+    valeur: l.Valeur_finale ?? l.Valeur,
+    statut: l.Statut || 'À saisir',
+    commentaire: l.Commentaire || ''
+  })));
+
+  const toutesLesLignes = [...lignesService];
+  const format = document.querySelector('input[name="format-export"]:checked').value;
+  const select = document.getElementById('select-service');
+  const serviceLabel = select.options[select.selectedIndex].text;
+  const periodeLabel = PARAMETRES ? `${PARAMETRES.Periode_active}_${PARAMETRES.Annee_active}` : '';
+
+  try {
+    if (format === 'ods') {
+      await genererODS(toutesLesLignes, serviceLabel, periodeLabel);
+    } else {
+      await genererPDF(toutesLesLignes, serviceLabel, periodeLabel);
+    }
+    fermerModaleExport();
+  } catch (e) {
+    messageExport.innerHTML = `<div class="message-etat erreur">Erreur : ${e.message}</div>`;
+  }
+}
+
+// --- Generation ODS (feuille de calcul OpenDocument, via JSZip) ---
+async function genererODS(lignes, serviceLabel, periodeLabel) {
+  const entetes = ['Territoire', 'Indicateur', 'Période', 'Valeur', 'Statut', 'Commentaire'];
+  const ligneEntete = '<table:table-row>' + entetes.map(e =>
+    `<table:table-cell office:value-type="string"><text:p>${echapperXml(e)}</text:p></table:table-cell>`
+  ).join('') + '</table:table-row>';
+
+  const lignesXml = lignes.map(l => {
+    const valeurs = [l.territoire, l.indicateur, l.periode, l.valeur, l.statut, l.commentaire];
+    return '<table:table-row>' + valeurs.map(v => {
+      const estNombre = typeof v === 'number';
+      return estNombre
+        ? `<table:table-cell office:value-type="float" office:value="${v}"><text:p>${v}</text:p></table:table-cell>`
+        : `<table:table-cell office:value-type="string"><text:p>${echapperXml(v ?? '')}</text:p></table:table-cell>`;
+    }).join('') + '</table:table-row>';
+  }).join('');
+
+  const contentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2">
+<office:body>
+<office:spreadsheet>
+<table:table table:name="Indicateurs">
+${entetes.map(() => '<table:table-column/>').join('')}
+${ligneEntete}
+${lignesXml}
+</table:table>
+</office:spreadsheet>
+</office:body>
+</office:document-content>`;
+
+  const manifestXml = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
+<manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>
+<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>`;
+
+  const zip = new JSZip();
+  zip.file('mimetype', 'application/vnd.oasis.opendocument.spreadsheet', { compression: 'STORE' });
+  zip.folder('META-INF').file('manifest.xml', manifestXml);
+  zip.file('content.xml', contentXml);
+
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.oasis.opendocument.spreadsheet' });
+  telechargerBlob(blob, `indicateurs_${nettoyerNomFichier(serviceLabel)}_${periodeLabel}.ods`);
+}
+
+// --- Generation PDF (jsPDF + autotable, avec le bloc prefete/prefet) ---
+async function genererPDF(lignes, serviceLabel, periodeLabel) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  // Bloc prefete/prefet en en-tete si disponible
+  const cartouche = TABLES.cartouche[0];
+  if (cartouche) {
+    const ids = idsPieceJointe(cartouche.BLOC_PREFETE);
+    if (ids.length > 0) {
+      const indice = (ids.length > 1 && PARAMETRES && PARAMETRES.Genre_prefet === 'Préfet') ? 1 : 0;
+      const dataUrl = await pieceJointeEnBase64(ids[Math.min(indice, ids.length - 1)]);
+      if (dataUrl) {
+        try { doc.addImage(dataUrl, 'PNG', 14, 10, 28, 28); } catch (e) { console.warn('Image non inseree dans le PDF :', e); }
+      }
+    }
+  }
+
+  doc.setFontSize(14);
+  doc.text('Indicateurs qualité - performance', 50, 20);
+  doc.setFontSize(10);
+  doc.text(`Service : ${serviceLabel}`, 50, 27);
+  doc.text(`Période : ${periodeLabel.replace('_', ' ')}`, 50, 33);
+  doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, 50, 39);
+
+  doc.autoTable({
+    startY: 46,
+    head: [['Territoire', 'Indicateur', 'Période', 'Valeur', 'Statut', 'Commentaire']],
+    body: lignes.map(l => [l.territoire, l.indicateur, l.periode, String(l.valeur ?? ''), l.statut, l.commentaire]),
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [0, 0, 145] }
+  });
+
+  doc.save(`indicateurs_${nettoyerNomFichier(serviceLabel)}_${periodeLabel}.pdf`);
+}
+
+function telechargerBlob(blob, nomFichier) {
+  const url = URL.createObjectURL(blob);
+  const lien = document.createElement('a');
+  lien.href = url;
+  lien.download = nomFichier;
+  document.body.appendChild(lien);
+  lien.click();
+  document.body.removeChild(lien);
+  URL.revokeObjectURL(url);
+}
+
+function nettoyerNomFichier(texte) {
+  return String(texte).replace(/[^a-zA-Z0-9]+/g, '_');
+}
+
+document.getElementById('btn-ouvrir-export').addEventListener('click', ouvrirModaleExport);
+
+chargerDonnees();
+</script>
+
+</body>
+</html>
