@@ -318,10 +318,6 @@
     </div>
   </div>
   <div class="controls">
-    <select id="select-genre-prefet" class="select-mini" style="display:none">
-      <option value="Préfète">Bloc Préfète</option>
-      <option value="Préfet">Bloc Préfet</option>
-    </select>
     <select id="select-service"><option>Chargement des services...</option></select>
     <button class="btn secondaire" id="btn-ouvrir-export" disabled>Exporter mes données</button>
   </div>
@@ -489,9 +485,11 @@ async function pieceJointeEnBase64(id) {
 // ---------------------------------------------------------------
 // Bloc prefete / prefet (haut a gauche)
 // ---------------------------------------------------------------
+// Le choix Prefete/Prefet est un parametre admin (PARAMETRES.Genre_prefet),
+// modifie uniquement depuis le widget admin - les agents ne peuvent pas le
+// changer depuis ce widget de saisie, ce volet se contente de l'afficher.
 async function afficherBlocPrefet() {
   const conteneur = document.getElementById('bloc-prefet');
-  const selectGenre = document.getElementById('select-genre-prefet');
   const cartouche = TABLES.cartouche[0];
   if (!cartouche) { conteneur.innerHTML = ''; return; }
 
@@ -500,32 +498,10 @@ async function afficherBlocPrefet() {
   const ids = idsPieceJointe(cartouche.BLOC_PREFETE);
   if (ids.length === 0) { conteneur.innerHTML = ''; return; }
 
-  if (ids.length > 1) {
-    // Deux visuels disponibles (prefete / prefet) -> selecteur pilote
-    // par PARAMETRES.Genre_prefet. A creer cote Grist si absent.
-    selectGenre.style.display = '';
-    const genre = (PARAMETRES && PARAMETRES.Genre_prefet) || 'Préfète';
-    selectGenre.value = genre;
-  } else {
-    selectGenre.style.display = 'none';
-  }
-
   const indice = (ids.length > 1 && PARAMETRES && PARAMETRES.Genre_prefet === 'Préfet') ? 1 : 0;
   const url = await urlPieceJointe(ids[Math.min(indice, ids.length - 1)]);
   conteneur.innerHTML = url ? `<img src="${url}" class="img-cartouche" alt="Bloc prefete/prefet">` : '';
 }
-
-document.getElementById('select-genre-prefet').addEventListener('change', async (e) => {
-  try {
-    await grist.docApi.applyUserActions([
-      ['UpdateRecord', 'PARAMETRES', PARAMETRES.id, { Genre_prefet: e.target.value }]
-    ]);
-    PARAMETRES.Genre_prefet = e.target.value;
-    await afficherBlocPrefet();
-  } catch (err) {
-    console.warn('Colonne PARAMETRES.Genre_prefet introuvable ou non modifiable :', err);
-  }
-});
 
 // ---------------------------------------------------------------
 // Regroupement des lignes SAISIES par indicateur/DE (pour afficher
@@ -697,10 +673,10 @@ async function afficherFiche(index) {
       <div id="zone-message"></div>
 
       <div class="bloc-historique">
-        <h3>Historique de la donnée (12 derniers mois)</h3>
+        <h3 id="titre-histo-donnee">Historique de la donnée (12 derniers mois)</h3>
         <div id="histo-donnee"><div class="histo-vide">Chargement...</div></div>
         ${premiere.Type_cible === 'DE_Performance' ? `
-        <h3 style="margin-top:16px">Historique de l'indicateur associé (12 derniers mois)</h3>
+        <h3 id="titre-histo-indicateur" style="margin-top:16px">Historique de l'indicateur associé (12 derniers mois)</h3>
         <div id="histo-indicateur"><div class="histo-vide">Chargement...</div></div>` : ''}
       </div>
     </div>
@@ -792,6 +768,11 @@ function dessinerMiniGraphe(valeurs) {
 
 function afficherHistoriqueDonnee(ligne) {
   const conteneur = document.getElementById('histo-donnee');
+  const titre = document.getElementById('titre-histo-donnee');
+  const libelle = ligne.Indicateur_Libelle || '';
+  if (titre) {
+    titre.textContent = `Historique de la donnée${libelle ? ' — ' + libelle : ''} (12 derniers mois)`;
+  }
   let lignesHisto = [];
   if (ligne.Type_cible === 'DE_Performance') {
     lignesHisto = TABLES.saisies.filter(l =>
@@ -825,18 +806,24 @@ function afficherHistoriqueDonnee(ligne) {
   const tableau = `<table class="histo-tableau"><thead><tr><th>Période</th><th>Valeur</th></tr></thead><tbody>
     ${lignesHisto.map(l => `<tr><td>${l.Periode_valeur} ${l.Annee}</td><td>${l.Valeur}</td></tr>`).join('')}
   </tbody></table>`;
-  const graphe = dessinerMiniGraphe(lignesHisto.map(l => Number(l.Valeur) || 0));
-  conteneur.innerHTML = tableau + graphe;
+  conteneur.innerHTML = tableau;
 }
 
 function afficherHistoriqueIndicateur(ligne) {
   const conteneur = document.getElementById('histo-indicateur');
+  const titre = document.getElementById('titre-histo-indicateur');
   const liens = TABLES.indicateurDe2.filter(l => l.Donnee_elementaire === ligne.Ref_DE_Performance);
   if (liens.length === 0) {
     conteneur.innerHTML = '<div class="histo-vide">Cette donnée n\'est pas encore rattachée à un indicateur (INDICATEUR_DE2).</div>';
     return;
   }
   const indicateurId = liens[0].Indicateur;
+  const indicateur = TABLES.indicPerf.find(ip => ip.id === indicateurId);
+  if (titre) {
+    const code = indicateur ? (indicateur.Code || indicateur.code || '') : '';
+    const libelleIndic = indicateur ? (indicateur.Libelle || '') : '';
+    titre.textContent = `Historique de l'indicateur associé${code ? ' — ' + code : ''}${libelleIndic ? ' : ' + libelleIndic : ''} (12 derniers mois)`;
+  }
   const resultats = TABLES.resultatsIndicateurs.filter(r =>
     r.Indicateur_Performance === indicateurId && periodeRecente(r.Annee, r.Periode_valeur)
   );
@@ -848,8 +835,7 @@ function afficherHistoriqueIndicateur(ligne) {
   const tableau = `<table class="histo-tableau"><thead><tr><th>Période</th><th>Valeur</th><th>Statut</th></tr></thead><tbody>
     ${resultats.map(r => `<tr><td>${r.Periode_valeur} ${r.Annee}</td><td>${r.Valeur}</td><td>${r.Statut || ''}</td></tr>`).join('')}
   </tbody></table>`;
-  const graphe = dessinerMiniGraphe(resultats.map(r => Number(r.Valeur) || 0));
-  conteneur.innerHTML = tableau + graphe;
+  conteneur.innerHTML = tableau;
 }
 
 // ---------------------------------------------------------------
