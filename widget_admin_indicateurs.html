@@ -2,45 +2,38 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Pilotage des indicateurs - Prefecture 04</title>
+<title>Saisie des indicateurs - Prefecture 04</title>
 
 <!--
-  WIDGET CUSTOM GRIST - volet ADMINISTRATEUR (reserve a Geraldine Lafond)
-  ---------------------------------------------------------------------
+  WIDGET CUSTOM GRIST - volet SAISIE (agents)
+  ---------------------------------------------------------------
+  A DEPLOYER : re-uploader ce fichier sur le depot GitHub (meme nom,
+  ca ecrase), puis dans Grist retirer/rajouter le widget (le simple
+  rechargement de page peut rester sur une version en cache).
+
+  Aucune cle API dans ce fichier : toute la communication passe par
+  grist-plugin-api.js charge depuis l'instance Grist elle-meme.
+
   ===================================================================
-  A FAIRE COTE GRIST AVANT DE TESTER CETTE VERSION :
-
-  1. SECURITE REELLE (indispensable, cote widget = confort seulement) :
-     Menu de gauche > Access Rules (ou "Regles d'acces") sur le document.
-     - Ajouter une regle sur la table/page WIDGET_ADMIN (ou sur les
-       tables sensibles type SAISIES en ecriture) du type :
-         Condition : user.Email != "geraldine.lafond@alpes-de-haute-provence.gouv.fr"
-                     and user.Email != "pref-qualite@alpes-de-haute-provence.gouv.fr"
-         Permissions : Voir/Modifier/Ajouter/Supprimer = Refuser
-     - Grist applique ces regles cote serveur : un agent qui devine
-       l'URL du widget admin ne pourra pas charger les donnees, meme
-       si le fichier HTML lui-meme est public sur GitHub Pages.
-     Le controle fait dans ce fichier (bandeau d'avertissement) n'est
-     qu'un confort visuel : il ne bloque rien techniquement.
-
-  2. Nouvelles colonnes a creer :
-     - Indicateurs_Performance_2026.Impact_qualite_service : Booleen,
-       non-formule. A cocher une fois pour les indicateurs qui touchent
-       directement le service rendu au public (accueil, sejour...).
-     - SAISIES.A_surveiller : Booleen, non-formule. Coche manuellement
-       par toi pour signaler un indicateur hors cible / degrade (la
-       detection automatique de "variation forte" ne devine pas si
-       c'est bon ou mauvais signe, donc ne peut pas cocher ca seule).
-
-  3. Deja fait normalement (cf. widget SAISIE) : PARAMETRES.Genre_prefet,
-     SAISIES.Import_BPATE, SAISIES.Statut transforme en formule.
+  A FAIRE COTE GRIST AVANT DE TESTER CETTE VERSION (voir le recap
+  envoye dans le chat pour le detail) :
+  1. Ajouter une colonne Choix "Genre_prefet" dans PARAMETRES,
+     choix possibles : "Préfète", "Préfet".
+  2. Ajouter une colonne Bool (non-formule) "Import_BPATE" dans
+     SAISIES, cochee automatiquement par le futur import trimestriel
+     BPATE (chantier en pause dans une autre conversation).
+  3. Transformer la colonne SAISIES.Statut en formule (coller le
+     code Python fourni a part).
+  4. Verifier que le nom de methode grist.docApi.getAccessToken
+     existe bien sur votre version de grist-plugin-api.js (utilise
+     ci-dessous pour afficher les pieces jointes) : sinon, remplacer
+     par l'equivalent documente sur votre instance.
   ===================================================================
 -->
 <script src="https://grist.numerique.gouv.fr/grist-plugin-api.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
   :root{
@@ -59,162 +52,296 @@
     --texte-secondaire: #6A6A6A;
   }
   *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:var(--gris-fond);color:var(--texte);font-size:14px}
-
-  .bandeau-alerte{
-    background:var(--orange-clair);color:var(--orange);
-    font-size:12.5px;padding:8px 20px;display:none;align-items:center;gap:8px;
+  body{
+    margin:0;
+    font-family:-apple-system,"Segoe UI",Arial,sans-serif;
+    background:var(--gris-fond);
+    color:var(--texte);
+    font-size:14px;
   }
-  .bandeau-alerte.visible{display:flex}
-
-  .bandeau-identite{
-    background:#fff;border-bottom:1px solid var(--gris-bordure);
-    padding:8px 20px;font-size:12.5px;color:var(--texte-secondaire);
-    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  header{
+    background:var(--bleu);
+    color:#fff;
+    padding:12px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:14px;
   }
-  .bandeau-identite input{padding:5px 8px;border:1px solid var(--gris-bordure);border-radius:4px;font-size:12.5px;min-width:260px}
-  .bandeau-identite button{padding:5px 10px;border:none;border-radius:4px;background:var(--bleu);color:#fff;font-size:12px;cursor:pointer}
-
-  header{background:var(--bleu);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  .img-cartouche{height:44px;width:auto;background:#fff;border-radius:4px;padding:2px}
-  header h1{font-size:16px;font-weight:600;margin:0}
-  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto}
-  select{padding:6px 9px;border-radius:4px;border:none;font-size:12.5px}
-  .btn{background:#fff;color:var(--bleu);border:none;padding:8px 14px;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
-  .btn:disabled{opacity:.5;cursor:not-allowed}
-  .btn.pleine{background:var(--bleu);color:#fff;border:1px solid rgba(255,255,255,.4)}
-
-  .filtres-secondaires{background:#fff;border-bottom:1px solid var(--gris-bordure);padding:10px 20px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px}
-  .filtres-secondaires label{display:flex;align-items:center;gap:5px;color:var(--texte-secondaire)}
-
-  .synthese{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;padding:16px 16px 0}
-  .carte{background:#fff;border:1px solid var(--gris-bordure);border-radius:8px;padding:12px 14px}
-  .carte .label{font-size:11.5px;color:var(--texte-secondaire)}
-  .carte .valeur{font-size:22px;font-weight:600;margin-top:2px}
-  .carte.alerte .valeur{color:var(--orange)}
-
-  .layout{display:grid;grid-template-columns:1fr 400px;gap:16px;padding:16px;align-items:start}
-  .panel{background:#fff;border:1px solid var(--gris-bordure);border-radius:8px}
-  .panel-header{padding:12px 14px;border-bottom:1px solid var(--gris-bordure);font-weight:600;display:flex;justify-content:space-between;align-items:center}
-  table.liste{width:100%;border-collapse:collapse;font-size:12.5px}
-  table.liste th{text-align:left;padding:8px 10px;color:var(--texte-secondaire);font-weight:500;font-size:10.5px;text-transform:uppercase;border-bottom:1px solid var(--gris-bordure)}
-  table.liste td{padding:7px 10px;border-bottom:1px solid #f0f0f0}
-  table.liste tr{cursor:pointer}
-  table.liste tr:hover{background:var(--gris-fond)}
-  table.liste tr.actif{background:var(--bleu-clair)}
-  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .entete-gauche{
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  .img-cartouche{
+    height:46px;
+    width:auto;
+    background:#fff;
+    border-radius:4px;
+    padding:2px;
+  }
+  header h1{
+    font-size:16px;
+    font-weight:600;
+    margin:0;
+  }
+  header .sub{
+    font-size:12px;
+    opacity:.85;
+    margin-top:2px;
+  }
+  .controls{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  select, .select-mini{
+    padding:6px 10px;
+    border-radius:4px;
+    border:none;
+    font-size:13px;
+  }
+  .layout{
+    display:grid;
+    grid-template-columns:300px 1fr;
+    gap:16px;
+    padding:16px;
+    align-items:start;
+  }
+  .panel{
+    background:#fff;
+    border:1px solid var(--gris-bordure);
+    border-radius:8px;
+  }
+  .panel-header{
+    padding:12px 14px;
+    border-bottom:1px solid var(--gris-bordure);
+    font-weight:600;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .progress{
+    font-weight:400;
+    font-size:12px;
+    color:var(--texte-secondaire);
+  }
+  .legende-codes{
+    padding:12px 14px;
+    border-bottom:1px solid var(--gris-bordure);
+    font-size:11.5px;
+    color:var(--texte-secondaire);
+    line-height:1.6;
+  }
+  .legende-codes b{color:var(--texte)}
+  .liste{
+    max-height:56vh;
+    overflow-y:auto;
+  }
+  .item{
+    padding:10px 14px;
+    border-bottom:1px solid #f0f0f0;
+    cursor:pointer;
+    display:flex;
+    align-items:flex-start;
+    gap:8px;
+  }
+  .item:hover{background:var(--gris-fond)}
+  .item.actif{background:var(--bleu-clair)}
+  .dot{
+    width:9px;height:9px;border-radius:50%;
+    margin-top:4px;flex-shrink:0;
+  }
   .dot.attente{background:var(--rouge)}
   .dot.encours{background:var(--orange)}
   .dot.ok{background:var(--vert)}
-  .badge-mini{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px;margin-left:4px}
-  .badge-mini.pap{background:var(--bleu-clair);color:var(--bleu)}
-  .badge-mini.surveiller{background:var(--orange-clair);color:var(--orange)}
-  .badge-mini.variation{background:var(--jaune-clair);color:var(--jaune)}
-  .empty-state{padding:30px 16px;text-align:center;color:var(--texte-secondaire);font-size:13px}
-  .liste-scroll{max-height:65vh;overflow-y:auto}
+  .item-texte{font-size:13px;line-height:1.3}
+  .item-mois{font-size:10.5px;color:var(--texte-secondaire);margin-top:2px}
+  .empty-state{
+    padding:30px 16px;
+    text-align:center;
+    color:var(--texte-secondaire);
+    font-size:13px;
+  }
+  .fiche{padding:20px}
+  .fiche-entete{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:14px;
+    gap:12px;
+  }
+  .fiche-code{font-size:12px;color:var(--texte-secondaire)}
+  .fiche-titre{font-size:17px;font-weight:600;margin:4px 0 0}
+  .badge{
+    display:inline-block;
+    font-size:11px;
+    font-weight:600;
+    padding:3px 8px;
+    border-radius:4px;
+    margin-right:6px;
+    margin-bottom:6px;
+  }
+  .badge.pap{background:var(--bleu-clair);color:var(--bleu)}
+  .badge.alerte{background:var(--orange-clair);color:var(--orange)}
+  .badge.info{background:var(--jaune-clair);color:var(--jaune)}
+  .lien-fiche{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    font-size:12.5px;
+    color:var(--bleu);
+    text-decoration:none;
+    border:1px solid var(--bleu-clair);
+    background:var(--bleu-clair);
+    padding:5px 10px;
+    border-radius:5px;
+    margin-bottom:10px;
+  }
+  .lien-fiche:hover{text-decoration:underline}
 
-  .fiche{padding:16px}
-  .fiche-titre{font-size:15px;font-weight:600;margin:0 0 2px}
-  .fiche-service{font-size:12px;color:var(--texte-secondaire);margin-bottom:14px}
-  .champ{margin-bottom:12px}
-  .champ label{display:block;font-size:12px;color:var(--texte-secondaire);margin-bottom:4px}
-  .champ input, .champ textarea{width:100%;padding:8px 10px;border:1px solid var(--gris-bordure);border-radius:4px;font-size:13px;font-family:inherit}
-  .tampon-mini{font-size:11px;font-weight:700;padding:4px 10px;border-radius:12px;border:1px solid var(--gris-bordure);color:var(--texte-secondaire);display:inline-block;margin-bottom:12px}
-  .tampon-mini.encours{border-color:var(--orange);color:var(--orange);background:var(--orange-clair)}
-  .tampon-mini.consolidee{border-color:var(--bleu);color:var(--bleu);background:var(--bleu-clair)}
-  .tampon-mini.fiabilisee{border-color:var(--vert);color:var(--vert);background:var(--vert-clair)}
-  .case-surveiller{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:14px;color:var(--orange)}
-  .lien-fiche{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--bleu);text-decoration:none;border:1px solid var(--bleu-clair);background:var(--bleu-clair);padding:5px 10px;border-radius:5px;margin-bottom:10px}
-  .btn-save{background:var(--bleu);color:#fff;border:none;padding:9px 18px;border-radius:6px;font-size:13px;cursor:pointer;width:100%}
-  .message-etat{font-size:12px;margin-top:10px;padding:8px 10px;border-radius:4px}
+  .info-bulle{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:14px;height:14px;
+    border-radius:50%;
+    background:var(--gris-bordure);
+    color:#555;
+    font-size:10px;
+    font-weight:700;
+    margin-left:5px;
+    cursor:help;
+    position:relative;
+  }
+  .info-bulle:hover .bulle-texte{display:block}
+  .bulle-texte{
+    display:none;
+    position:absolute;
+    z-index:20;
+    bottom:20px;
+    left:0;
+    width:240px;
+    background:#262626;
+    color:#fff;
+    font-size:11.5px;
+    font-weight:400;
+    line-height:1.4;
+    padding:8px 10px;
+    border-radius:6px;
+    box-shadow:0 4px 10px rgba(0,0,0,.2);
+  }
+
+  table.lignes-periode{width:100%;border-collapse:collapse;margin-bottom:14px}
+  table.lignes-periode th{
+    text-align:left;font-size:11.5px;color:var(--texte-secondaire);
+    padding:6px 8px;border-bottom:1px solid var(--gris-bordure);font-weight:600;
+  }
+  table.lignes-periode td{padding:7px 8px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+  table.lignes-periode input, table.lignes-periode textarea{
+    width:100%;padding:6px 8px;border:1px solid var(--gris-bordure);
+    border-radius:4px;font-size:13px;font-family:inherit;
+  }
+  .tampon-ligne{
+    font-size:10.5px;font-weight:700;letter-spacing:.3px;
+    padding:3px 8px;border-radius:12px;white-space:nowrap;
+    border:1px solid var(--gris-bordure);color:var(--texte-secondaire);
+  }
+  .tampon-ligne.encours{border-color:var(--orange);color:var(--orange);background:var(--orange-clair)}
+  .tampon-ligne.consolidee{border-color:var(--bleu);color:var(--bleu);background:var(--bleu-clair)}
+  .tampon-ligne.fiabilisee{border-color:var(--vert);color:var(--vert);background:var(--vert-clair)}
+  .tampon-ligne.attente{border-color:var(--gris-bordure);color:var(--texte-secondaire)}
+
+  .valeur-finale{font-size:12px;color:var(--texte-secondaire);margin:-4px 0 12px}
+
+  .pied{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    border-top:1px solid var(--gris-bordure);
+    padding-top:14px;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .auteur{font-size:12px;color:var(--texte-secondaire)}
+  .btn{
+    background:var(--bleu);
+    color:#fff;
+    border:none;
+    padding:9px 18px;
+    border-radius:6px;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .btn.secondaire{background:#fff;color:var(--bleu);border:1px solid var(--bleu)}
+  .btn:hover{opacity:.9}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .message-etat{
+    font-size:12px;
+    margin-top:10px;
+    padding:8px 10px;
+    border-radius:4px;
+  }
   .message-etat.succes{background:var(--vert-clair);color:var(--vert)}
   .message-etat.erreur{background:var(--orange-clair);color:var(--orange)}
 
-  .bloc-historique{margin-top:18px;border-top:1px solid var(--gris-bordure);padding-top:14px}
-  .bloc-historique h3{font-size:12.5px;margin:0 0 8px}
-  .histo-tableau{width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px}
-  .histo-tableau th,.histo-tableau td{padding:3px 5px;border-bottom:1px solid #f0f0f0;text-align:left}
-  .histo-vide{font-size:11.5px;color:var(--texte-secondaire);font-style:italic}
+  .bloc-historique{margin-top:22px;border-top:1px solid var(--gris-bordure);padding-top:16px}
+  .bloc-historique h3{font-size:13px;margin:0 0 10px}
+  .histo-grille{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:780px){.histo-grille{grid-template-columns:1fr}}
+  .histo-tableau{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px}
+  .histo-tableau th,.histo-tableau td{padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:left}
+  .histo-vide{font-size:12px;color:var(--texte-secondaire);font-style:italic}
 
-  .voile{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
-  .modale{background:#fff;border-radius:10px;max-width:640px;width:100%;max-height:88vh;overflow-y:auto;padding:20px}
+  /* Modale export */
+  .voile{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50}
+  .modale{background:#fff;border-radius:10px;max-width:560px;width:92%;max-height:86vh;overflow-y:auto;padding:20px}
   .modale h2{font-size:15px;margin:0 0 14px}
   .modale-section{margin-bottom:16px}
   .modale-section label{display:block;font-size:12px;color:var(--texte-secondaire);margin-bottom:6px;font-weight:600}
-  .liste-check{max-height:180px;overflow-y:auto;border:1px solid var(--gris-bordure);border-radius:6px;padding:8px}
+  .liste-check{max-height:160px;overflow-y:auto;border:1px solid var(--gris-bordure);border-radius:6px;padding:8px}
   .ligne-check{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0}
   .modale-pied{display:flex;justify-content:flex-end;gap:10px;margin-top:10px}
   .radio-ligne{display:flex;gap:16px;font-size:13px}
-  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-  .btn-preset{padding:6px 12px;border-radius:14px;border:1px solid var(--bleu);background:var(--bleu-clair);color:var(--bleu);font-size:12px;cursor:pointer}
-  .zone-import{border:2px dashed var(--gris-bordure);border-radius:8px;padding:20px;text-align:center;color:var(--texte-secondaire);font-size:12.5px}
-  .apercu-tableau{width:100%;border-collapse:collapse;font-size:11px;margin-top:14px}
-  .apercu-tableau th,.apercu-tableau td{border:1px solid var(--gris-bordure);padding:4px 6px;text-align:left;white-space:nowrap}
-  .avertissement-import{background:var(--orange-clair);color:var(--orange);font-size:12px;padding:8px 10px;border-radius:6px;margin-top:12px}
-  .relance-service{border:1px solid var(--gris-bordure);border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12.5px}
-  .relance-service .titre-service{font-weight:600;margin-bottom:4px}
-  .lien-mail{display:inline-block;margin-top:6px;font-size:12px;color:var(--bleu);text-decoration:none;border:1px solid var(--bleu);padding:4px 10px;border-radius:5px}
 </style>
 </head>
 <body>
 
-<div class="bandeau-identite" id="bandeau-identite"></div>
-<div class="bandeau-alerte" id="bandeau-alerte">
-  ⚠️ Cette interface est réservée à l'administratrice qualité. L'adresse détectée ne correspond pas au compte autorisé. Si ce n'est pas vous, merci de fermer cette page. (Rappel : la vraie protection se fait via les Access Rules Grist, pas ce message.)
-</div>
-
 <header>
-  <div id="bloc-prefet"></div>
-  <h1>Pilotage des indicateurs qualité - performance</h1>
+  <div class="entete-gauche">
+    <div id="bloc-prefet"></div>
+    <div>
+      <h1 id="titre-cartouche">Indicateurs qualite - performance</h1>
+      <div class="sub" id="periode-active">Periode en cours : chargement...</div>
+    </div>
+  </div>
   <div class="controls">
-    <select id="select-genre-prefet">
-      <option value="Préfète">Bloc Préfète</option>
-      <option value="Préfet">Bloc Préfet</option>
-    </select>
-    <button class="btn" id="btn-relances">Relances</button>
-    <button class="btn" id="btn-import-bpate">Importer BPATE</button>
-    <button class="btn pleine" id="btn-ouvrir-export" disabled>Exporter</button>
+    <select id="select-service"><option>Chargement des services...</option></select>
+    <button class="btn secondaire" id="btn-ouvrir-export" disabled>Exporter mes données</button>
   </div>
 </header>
 
-<div class="filtres-secondaires">
-  <select id="select-annee"></select>
-  <select id="select-type-periode">
-    <option value="Trimestrielle">Trimestrielle</option>
-    <option value="Mensuelle">Mensuelle</option>
-    <option value="Semestrielle">Semestrielle</option>
-    <option value="Annuelle">Annuelle</option>
-  </select>
-  <select id="select-periode-valeur"></select>
-  <select id="select-service"><option value="">Tous les services</option></select>
-  <select id="select-type-indicateur">
-    <option value="">Performance + Qualité</option>
-    <option value="Performance">Performance seule</option>
-    <option value="Qualite">Qualité seule</option>
-  </select>
-  <label><input type="checkbox" id="filtre-pap"> PAP uniquement</label>
-  <label><input type="checkbox" id="filtre-impact-qualite"> Impact qualité de service uniquement</label>
-  <label><input type="checkbox" id="filtre-surveiller"> À surveiller uniquement</label>
-</div>
-
-<div class="synthese" id="synthese"></div>
-
 <div class="layout">
   <div class="panel">
-    <div class="panel-header">
-      <span>Indicateurs</span>
-      <span id="compteur" style="font-weight:400;font-size:12px;color:var(--texte-secondaire)">0 / 0</span>
+    <div class="legende-codes">
+      <div><b>IM</b> : indicateur métier — Performance</div>
+      <div><b>IF</b> : indicateur fonction support — Performance</div>
+      <div><b>QO</b> : indicateur Qualité Obligatoire (référentiel Quali-ATE)</div>
+      <div><b>QF</b> : indicateur Qualité local, facultatif au regard du référentiel mais saisie obligatoire</div>
     </div>
-    <div class="liste-scroll">
-      <table class="liste">
-        <thead><tr><th></th><th>Service</th><th>Indicateur</th><th>Valeur</th><th>Statut</th></tr></thead>
-        <tbody id="corps-liste"></tbody>
-      </table>
+    <div class="panel-header">
+      <span>A saisir</span>
+      <span class="progress" id="compteur">0 / 0</span>
+    </div>
+    <div class="liste" id="liste-indicateurs">
+      <div class="empty-state">Selectionnez un service</div>
     </div>
   </div>
 
   <div class="panel" id="panel-fiche">
-    <div class="empty-state">Sélectionnez une ligne pour la consulter ou la corriger</div>
+    <div class="empty-state">Cliquez sur un indicateur dans la liste pour le saisir</div>
   </div>
 </div>
 
@@ -226,59 +353,68 @@
 // ---------------------------------------------------------------
 let TABLES = {};
 let SERVICES = [];
-let UTILISATEURS = [];
 let PARAMETRES = null;
-let lignesFiltrees = [];
-let ligneSelectionneeId = null;
-
-const EMAILS_ADMIN = [
-  'geraldine.lafond@alpes-de-haute-provence.gouv.fr',
-  'pref-qualite@alpes-de-haute-provence.gouv.fr'
-];
+let groupesFiltres = [];   // groupes d'indicateurs/DE pour le service + periode actifs
+let groupeSelectionne = null;
+let jetonAcces = null;
 
 const MOIS_ORDRE = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
-const PERIODES_PAR_TYPE = {
-  Trimestrielle: ['T1', 'T2', 'T3', 'T4'],
-  Mensuelle: MOIS_ORDRE,
-  Semestrielle: ['S1', 'S2'],
-  Annuelle: ['Annuel']
+// Textes des infobulles : copies depuis les descriptions de colonnes du
+// document Grist (figes ici plutot que rappeles dynamiquement, plus robuste)
+const INFOBULLES = {
+  valeur: "Il s'agit de la valeur brute pour cette donnée, cette période et votre service. En cas de doute, l'unité est précisée dans la fiche technique téléchargeable.",
+  statut: "Reflète l'état de la ligne dans le cycle de vie de la donnée : en cours de saisie, consolidée (cas multi-services comme le DCL) ou fiabilisée (conforme au tableau transmis par le BPATE). Ce champ se met à jour automatiquement, il n'y a rien à choisir.",
+  commentaire: "Indiquez les actions engagées, difficultés rencontrées, progrès réalisés. Ces informations sont utiles pour contextualiser le résultat lors des remontées au SGAR et au ministère.",
+  pap: "Signale un indicateur particulièrement scruté par le ministère dans le cadre du projet annuel de performance (PAP) du P354.",
+  dataAte: "Si cette donnée nécessite d'être saisie dans l'application DATA-ATE, un message d'alerte s'affiche : pensez à la saisir aussi là-bas.",
+  transmisBpate: "Cette donnée est transmise par la direction métier via BPATE. Vous pouvez saisir votre propre valeur pour comparaison, mais la donnée finale retenue sera celle de la direction métier.",
+  valeurFinale: "Valeur retenue au final pour l'indicateur. Pour les indicateurs partagés entre plusieurs services (consolidation DCL), elle est calculée à partir des valeurs de tous les bureaux concernés et peut différer de votre saisie individuelle."
 };
 
 grist.ready({ requiredAccess: 'full' });
 
 // ---------------------------------------------------------------
-// Identification "de confort" (PAS une securite - voir Access Rules
-// dans les instructions en tete de fichier)
-// ---------------------------------------------------------------
-function initIdentite() {
-  const bandeau = document.getElementById('bandeau-identite');
-  const emailStocke = localStorage.getItem('qp_admin_email');
-  function rendre(email) {
-    bandeau.innerHTML = `
-      Connecté(e) en tant que : <strong>${email || 'non renseigné'}</strong>
-      <button id="btn-changer-identite">Changer</button>`;
-    document.getElementById('btn-changer-identite').addEventListener('click', demanderIdentite);
-    document.getElementById('bandeau-alerte').classList.toggle('visible', !!email && !EMAILS_ADMIN.includes(email));
-  }
-  function demanderIdentite() {
-    bandeau.innerHTML = `
-      <label>Votre adresse professionnelle :</label>
-      <input type="email" id="champ-identite" value="${emailStocke || ''}" placeholder="prenom.nom@alpes-de-haute-provence.gouv.fr">
-      <button id="btn-valider-identite">Valider</button>`;
-    document.getElementById('btn-valider-identite').addEventListener('click', () => {
-      const val = document.getElementById('champ-identite').value.trim();
-      localStorage.setItem('qp_admin_email', val);
-      rendre(val);
-    });
-  }
-  if (emailStocke) rendre(emailStocke); else demanderIdentite();
-}
-initIdentite();
-
-// ---------------------------------------------------------------
 // Chargement des donnees
 // ---------------------------------------------------------------
+async function chargerDonnees() {
+  const [saisies, services, parametres, indicPerf, donneesElem, indicQualite,
+         donneesElemQualite, deDcl, indicateurDe2, resultatsIndicateurs,
+         cartouche] = await Promise.all([
+    grist.docApi.fetchTable('SAISIES'),
+    grist.docApi.fetchTable('SERVICES'),
+    grist.docApi.fetchTable('PARAMETRES'),
+    grist.docApi.fetchTable('Indicateurs_Performance_2026'),
+    grist.docApi.fetchTable('Donnees_elementaires'),
+    grist.docApi.fetchTable('Indicateurs_Qualite'),
+    grist.docApi.fetchTable('Donnees_elementaires_Qualite'),
+    grist.docApi.fetchTable('DE_DCL'),
+    grist.docApi.fetchTable('INDICATEUR_DE2'),
+    grist.docApi.fetchTable('RESULTATS_INDICATEURS'),
+    grist.docApi.fetchTable('CARTOUCHE_INFO')
+  ]);
+
+  TABLES = {
+    saisies: tableEnLignes(saisies),
+    indicPerf: tableEnLignes(indicPerf),
+    donneesElem: tableEnLignes(donneesElem),
+    indicQualite: tableEnLignes(indicQualite),
+    donneesElemQualite: tableEnLignes(donneesElemQualite),
+    deDcl: tableEnLignes(deDcl),
+    indicateurDe2: tableEnLignes(indicateurDe2),
+    resultatsIndicateurs: tableEnLignes(resultatsIndicateurs),
+    cartouche: tableEnLignes(cartouche)
+  };
+  // Note : SERVICES.Actif est une formule vide dans ce document (toujours
+  // fausse) -> on ne filtre pas dessus tant qu'elle n'est pas programmee.
+  SERVICES = tableEnLignes(services);
+  PARAMETRES = tableEnLignes(parametres)[0] || null;
+
+  remplirServices();
+  afficherPeriodeActive();
+  await afficherBlocPrefet();
+}
+
 function tableEnLignes(table) {
   const lignes = [];
   const nb = table.id.length;
@@ -293,87 +429,27 @@ function tableEnLignes(table) {
   return lignes;
 }
 
-async function chargerDonnees() {
-  const [saisies, services, parametres, indicPerf, indicQualite, deDcl,
-         indicateurDe2, resultatsIndicateurs, departements, cartouche, utilisateurs] = await Promise.all([
-    grist.docApi.fetchTable('SAISIES'),
-    grist.docApi.fetchTable('SERVICES'),
-    grist.docApi.fetchTable('PARAMETRES'),
-    grist.docApi.fetchTable('Indicateurs_Performance_2026'),
-    grist.docApi.fetchTable('Indicateurs_Qualite'),
-    grist.docApi.fetchTable('DE_DCL'),
-    grist.docApi.fetchTable('INDICATEUR_DE2'),
-    grist.docApi.fetchTable('RESULTATS_INDICATEURS'),
-    grist.docApi.fetchTable('DEPARTEMENTS'),
-    grist.docApi.fetchTable('CARTOUCHE_INFO'),
-    grist.docApi.fetchTable('Utilisateurs_Services')
-  ]);
-
-  TABLES = {
-    saisies: tableEnLignes(saisies),
-    indicPerf: tableEnLignes(indicPerf),
-    indicQualite: tableEnLignes(indicQualite),
-    deDcl: tableEnLignes(deDcl),
-    indicateurDe2: tableEnLignes(indicateurDe2),
-    resultatsIndicateurs: tableEnLignes(resultatsIndicateurs),
-    departements: tableEnLignes(departements),
-    cartouche: tableEnLignes(cartouche)
-  };
-  SERVICES = tableEnLignes(services);
-  UTILISATEURS = tableEnLignes(utilisateurs);
-  PARAMETRES = tableEnLignes(parametres)[0] || null;
-
-  remplirAnnees();
-  remplirPeriodeValeur();
-  remplirServices();
-  await afficherBlocPrefet();
-  appliquerFiltres();
-}
-
-function remplirAnnees() {
-  const select = document.getElementById('select-annee');
-  const annees = [...new Set(TABLES.saisies.map(l => l.Annee).filter(a => a))].sort((a, b) => b - a);
-  if (annees.length === 0) annees.push(new Date().getFullYear());
-  select.innerHTML = annees.map(a => `<option value="${a}">${a}</option>`).join('');
-  select.addEventListener('change', appliquerFiltres);
-}
-
-function remplirPeriodeValeur() {
-  const selectType = document.getElementById('select-type-periode');
-  const selectValeur = document.getElementById('select-periode-valeur');
-  function maj() {
-    const options = PERIODES_PAR_TYPE[selectType.value] || [];
-    selectValeur.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join('');
-    appliquerFiltres();
-  }
-  selectType.addEventListener('change', maj);
-  selectValeur.addEventListener('change', appliquerFiltres);
-  if (PARAMETRES) {
-    selectType.value = 'Trimestrielle';
-  }
-  maj();
+function afficherPeriodeActive() {
+  if (!PARAMETRES) return;
+  document.getElementById('periode-active').textContent =
+    `Periode en cours : ${PARAMETRES.Periode_active} ${PARAMETRES.Annee_active}`;
 }
 
 function remplirServices() {
   const select = document.getElementById('select-service');
-  select.innerHTML = '<option value="">Tous les services</option>' +
+  select.innerHTML = '<option value="">Choisir un service...</option>' +
     SERVICES.map(s => `<option value="${s.id}">${s.Libelle}</option>`).join('');
-  select.addEventListener('change', appliquerFiltres);
+  select.addEventListener('change', () => filtrerEtAfficherListe(select.value));
 }
-
-function nomService(serviceId) {
-  const s = SERVICES.find(s => s.id === serviceId);
-  return s ? s.Libelle : '(service inconnu)';
-}
-
-['select-type-indicateur','filtre-pap','filtre-impact-qualite','filtre-surveiller'].forEach(id => {
-  document.getElementById(id).addEventListener('change', appliquerFiltres);
-});
 
 // ---------------------------------------------------------------
-// Pieces jointes (meme mecanique que le widget SAISIE)
+// Pieces jointes : construction d'une URL de telechargement via un
+// jeton d'acces temporaire (aucune cle API stockee dans le widget)
 // ---------------------------------------------------------------
 function idsPieceJointe(valeurCellule) {
+  // Une colonne Attachments Grist encode ses valeurs comme une liste,
+  // parfois prefixee par "L" selon la version de l'API. On gere les
+  // deux cas.
   if (Array.isArray(valeurCellule)) {
     if (valeurCellule[0] === 'L') return valeurCellule.slice(1);
     return valeurCellule;
@@ -383,14 +459,17 @@ function idsPieceJointe(valeurCellule) {
 
 async function urlPieceJointe(id) {
   try {
-    const jeton = await grist.docApi.getAccessToken({ readOnly: true });
-    return `${jeton.baseUrl}/attachments/${id}/download?auth=${jeton.token}`;
+    if (!jetonAcces) {
+      jetonAcces = await grist.docApi.getAccessToken({ readOnly: true });
+    }
+    return `${jetonAcces.baseUrl}/attachments/${id}/download?auth=${jetonAcces.token}`;
   } catch (e) {
     console.warn('Impossible de recuperer le jeton d\'acces aux pieces jointes :', e);
     return '';
   }
 }
 
+// recupere l'image en base64 (utile pour l'inserer dans un PDF)
 async function pieceJointeEnBase64(id) {
   const url = await urlPieceJointe(id);
   if (!url) return null;
@@ -403,244 +482,248 @@ async function pieceJointeEnBase64(id) {
   });
 }
 
+// ---------------------------------------------------------------
+// Bloc prefete / prefet (haut a gauche)
+// ---------------------------------------------------------------
+// Le choix Prefete/Prefet est un parametre admin (PARAMETRES.Genre_prefet),
+// modifie uniquement depuis le widget admin - les agents ne peuvent pas le
+// changer depuis ce widget de saisie, ce volet se contente de l'afficher.
 async function afficherBlocPrefet() {
   const conteneur = document.getElementById('bloc-prefet');
   const cartouche = TABLES.cartouche[0];
   if (!cartouche) { conteneur.innerHTML = ''; return; }
+
+  document.getElementById('titre-cartouche').textContent = cartouche.TITRE || 'Indicateurs qualite - performance';
+
   const ids = idsPieceJointe(cartouche.BLOC_PREFETE);
   if (ids.length === 0) { conteneur.innerHTML = ''; return; }
-  const genre = (PARAMETRES && PARAMETRES.Genre_prefet) || 'Préfète';
-  document.getElementById('select-genre-prefet').value = genre;
-  const indice = (ids.length > 1 && genre === 'Préfet') ? 1 : 0;
+
+  const indice = (ids.length > 1 && PARAMETRES && PARAMETRES.Genre_prefet === 'Préfet') ? 1 : 0;
   const url = await urlPieceJointe(ids[Math.min(indice, ids.length - 1)]);
   conteneur.innerHTML = url ? `<img src="${url}" class="img-cartouche" alt="Bloc prefete/prefet">` : '';
 }
 
-document.getElementById('select-genre-prefet').addEventListener('change', async (e) => {
-  try {
-    await grist.docApi.applyUserActions([
-      ['UpdateRecord', 'PARAMETRES', PARAMETRES.id, { Genre_prefet: e.target.value }]
-    ]);
-    PARAMETRES.Genre_prefet = e.target.value;
-    await afficherBlocPrefet();
-  } catch (err) {
-    console.warn('Colonne PARAMETRES.Genre_prefet introuvable ou non modifiable :', err);
-  }
-});
-
 // ---------------------------------------------------------------
-// Detection semi-automatique de "variation forte" vs periode
-// precedente (n'indique pas si c'est bon ou mauvais signe : juste
-// un signal a verifier, en complement du A_surveiller manuel)
+// Regroupement des lignes SAISIES par indicateur/DE (pour afficher
+// les donnees mensuelles - jusqu'a 3 lignes - sur une seule fiche)
 // ---------------------------------------------------------------
-function periodePrecedente(annee, typePeriode, periodeValeur) {
-  const listePeriodes = PERIODES_PAR_TYPE[typePeriode] || [];
-  const idx = listePeriodes.indexOf(periodeValeur);
-  if (idx <= 0) return { annee: annee - 1, periodeValeur: listePeriodes[listePeriodes.length - 1] };
-  return { annee, periodeValeur: listePeriodes[idx - 1] };
+function clefRegroupement(l) {
+  if (l.Type_cible === 'DE_Performance') return 'DEP-' + l.Ref_DE_Performance;
+  if (l.Type_cible === 'DE_Qualite') return 'DEQ-' + l.Ref_DE_Qualite;
+  return 'IQ-' + l.Ref_Indicateur_Qualite;
 }
 
-function variationForte(ligne) {
-  if (ligne.Valeur === null || ligne.Valeur === '' || ligne.Valeur === undefined) return false;
-  const clefRef = ligne.Type_cible === 'DE_Performance' ? 'Ref_DE_Performance'
-    : ligne.Type_cible === 'DE_Qualite' ? 'Ref_DE_Qualite' : 'Ref_Indicateur_Qualite';
-  const precedente = periodePrecedente(ligne.Annee, ligne.Periode_Type, ligne.Periode_valeur);
-  const ligneAvant = TABLES.saisies.find(l =>
-    l[clefRef] === ligne[clefRef] && l.Service === ligne.Service &&
-    l.Annee === precedente.annee && l.Periode_valeur === precedente.periodeValeur
-  );
-  if (!ligneAvant || ligneAvant.Valeur === null || ligneAvant.Valeur === '' || Number(ligneAvant.Valeur) === 0) return false;
-  const variation = Math.abs((Number(ligne.Valeur) - Number(ligneAvant.Valeur)) / Number(ligneAvant.Valeur));
-  return variation > 0.15; // seuil de 15%, ajustable
-}
-
-// ---------------------------------------------------------------
-// Filtrage
-// ---------------------------------------------------------------
-function estIndicateurPerf(l) { return l.Type_cible === 'DE_Performance'; }
-function estIndicateurQualite(l) { return l.Type_cible === 'DE_Qualite' || l.Type_cible === 'Indicateur_Qualite'; }
-
-function aImpactQualiteService(l) {
-  if (l.Type_cible !== 'DE_Performance') return false;
-  const liens = TABLES.indicateurDe2.filter(x => x.Donnee_elementaire === l.Ref_DE_Performance);
-  return liens.some(x => {
-    const indic = TABLES.indicPerf.find(ip => ip.id === x.Indicateur);
-    return indic && indic.Impact_qualite_service;
+function construireGroupes(lignes) {
+  const carte = new Map();
+  lignes.forEach(l => {
+    const clef = clefRegroupement(l);
+    if (!carte.has(clef)) carte.set(clef, []);
+    carte.get(clef).push(l);
+  });
+  return Array.from(carte.values()).map(groupe => {
+    groupe.sort((a, b) => MOIS_ORDRE.indexOf(a.Periode_valeur) - MOIS_ORDRE.indexOf(b.Periode_valeur));
+    return groupe;
   });
 }
 
-function appliquerFiltres() {
-  ligneSelectionneeId = null;
-  document.getElementById('panel-fiche').innerHTML =
-    '<div class="empty-state">Sélectionnez une ligne pour la consulter ou la corriger</div>';
-
-  const annee = Number(document.getElementById('select-annee').value);
-  const typePeriode = document.getElementById('select-type-periode').value;
-  const periodeValeur = document.getElementById('select-periode-valeur').value;
-  const serviceId = document.getElementById('select-service').value;
-  const typeIndicateur = document.getElementById('select-type-indicateur').value;
-  const papSeul = document.getElementById('filtre-pap').checked;
-  const impactSeul = document.getElementById('filtre-impact-qualite').checked;
-  const surveillerSeul = document.getElementById('filtre-surveiller').checked;
-
-  lignesFiltrees = TABLES.saisies.filter(l => {
-    if (l.Annee !== annee || l.Periode_Type !== typePeriode || l.Periode_valeur !== periodeValeur) return false;
-    if (serviceId && String(l.Service) !== String(serviceId)) return false;
-    if (typeIndicateur === 'Performance' && !estIndicateurPerf(l)) return false;
-    if (typeIndicateur === 'Qualite' && !estIndicateurQualite(l)) return false;
-    if (papSeul && !l.PAP) return false;
-    if (surveillerSeul && !l.A_surveiller) return false;
-    if (impactSeul && !aImpactQualiteService(l)) return false;
-    return true;
-  });
-
-  document.getElementById('btn-ouvrir-export').disabled = lignesFiltrees.length === 0;
-  afficherSynthese();
-  afficherListe();
-}
-
-function afficherSynthese() {
-  const total = lignesFiltrees.length;
-  const remplis = lignesFiltrees.filter(l => l.Valeur !== null && l.Valeur !== '' && l.Valeur !== undefined).length;
-  const fiabilises = lignesFiltrees.filter(l => l.Statut === 'Fiabilisée BPATE').length;
-  const parService = new Set(lignesFiltrees.map(l => l.Service)).size;
-  const aSurveiller = lignesFiltrees.filter(l => l.A_surveiller).length;
-  const variations = lignesFiltrees.filter(variationForte).length;
-
-  document.getElementById('synthese').innerHTML = `
-    <div class="carte"><div class="label">Indicateurs</div><div class="valeur">${total}</div></div>
-    <div class="carte"><div class="label">Saisis</div><div class="valeur">${remplis} / ${total}</div></div>
-    <div class="carte"><div class="label">Fiabilisés</div><div class="valeur">${fiabilises}</div></div>
-    <div class="carte"><div class="label">Services concernés</div><div class="valeur">${parService}</div></div>
-    <div class="carte alerte"><div class="label">À surveiller</div><div class="valeur">${aSurveiller}</div></div>
-    <div class="carte alerte"><div class="label">Variations fortes</div><div class="valeur">${variations}</div></div>
-  `;
-}
-
-function classeStatutDot(ligne) {
-  if (ligne.Valeur === null || ligne.Valeur === '' || ligne.Valeur === undefined) return 'attente';
-  if (ligne.Statut === 'Fiabilisée BPATE' || ligne.Statut === 'Consolidée') return 'ok';
+function statutDuGroupe(groupe) {
+  const auMoinsUneVide = groupe.some(l => estVide(l.Valeur));
+  if (auMoinsUneVide) return 'attente';
+  const tousFiabilises = groupe.every(l => l.Statut === 'Fiabilisée BPATE');
+  if (tousFiabilises) return 'ok';
   return 'encours';
 }
 
-function afficherListe() {
-  const corps = document.getElementById('corps-liste');
-  document.getElementById('compteur').textContent =
-    `${lignesFiltrees.filter(l => l.Valeur !== null && l.Valeur !== '' && l.Valeur !== undefined).length} / ${lignesFiltrees.length}`;
+function estVide(v) {
+  return v === null || v === '' || v === undefined;
+}
 
-  if (lignesFiltrees.length === 0) {
-    corps.innerHTML = '<tr><td colspan="5" class="empty-state">Aucune ligne pour ces filtres</td></tr>';
+// ---------------------------------------------------------------
+// Filtrage : lignes SAISIES de la periode active pour le service choisi
+// ---------------------------------------------------------------
+function filtrerEtAfficherListe(serviceId) {
+  groupeSelectionne = null;
+  document.getElementById('panel-fiche').innerHTML =
+    '<div class="empty-state">Cliquez sur un indicateur dans la liste pour le saisir</div>';
+  document.getElementById('btn-ouvrir-export').disabled = !serviceId;
+
+  if (!serviceId) {
+    groupesFiltres = [];
+  } else {
+    const lignesActives = TABLES.saisies.filter(l =>
+      l.Est_periode_active && String(l.Service) === String(serviceId)
+    );
+    groupesFiltres = construireGroupes(lignesActives);
+  }
+
+  const compteur = document.getElementById('compteur');
+  const rempli = groupesFiltres.filter(g => g.every(l => !estVide(l.Valeur))).length;
+  compteur.textContent = `${rempli} / ${groupesFiltres.length}`;
+
+  const liste = document.getElementById('liste-indicateurs');
+  if (groupesFiltres.length === 0) {
+    liste.innerHTML = '<div class="empty-state">Aucun indicateur a saisir pour ce service sur la periode en cours</div>';
     return;
   }
 
-  corps.innerHTML = lignesFiltrees.map(l => {
-    const badgePap = l.PAP ? '<span class="badge-mini pap">PAP</span>' : '';
-    const badgeSurveiller = l.A_surveiller ? '<span class="badge-mini surveiller">À surveiller</span>' : '';
-    const badgeVariation = (!l.A_surveiller && variationForte(l)) ? '<span class="badge-mini variation">Variation forte</span>' : '';
+  liste.innerHTML = groupesFiltres.map((groupe, index) => {
+    const premiere = groupe[0];
+    const libelle = premiere.Indicateur_Libelle || '(libelle indisponible)';
+    const mois = groupe.length > 1 ? `<div class="item-mois">${groupe.map(l => l.Periode_valeur).join(' · ')}</div>` : '';
     return `
-    <tr data-id="${l.id}">
-      <td><span class="dot ${classeStatutDot(l)}"></span></td>
-      <td>${nomService(l.Service)}</td>
-      <td>${l.Indicateur_Libelle || ''}${badgePap}${badgeSurveiller}${badgeVariation}</td>
-      <td>${l.Valeur ?? '-'}</td>
-      <td>${l.Statut || 'À saisir'}</td>
-    </tr>`;
+      <div class="item" data-index="${index}">
+        <span class="dot ${statutDuGroupe(groupe)}"></span>
+        <div>
+          <div class="item-texte">${libelle}</div>
+          ${mois}
+        </div>
+      </div>`;
   }).join('');
 
-  corps.querySelectorAll('tr').forEach(tr => {
-    tr.addEventListener('click', () => afficherFiche(Number(tr.dataset.id)));
+  liste.querySelectorAll('.item').forEach(el => {
+    el.addEventListener('click', () => afficherFiche(Number(el.dataset.index)));
   });
 }
 
 // ---------------------------------------------------------------
-// Fiche de detail / correction admin
-// Contrairement au widget agent, l'admin peut corriger une ligne
-// meme si elle est deja "Fiabilisée BPATE".
-// Le Statut n'est plus saisi manuellement : c'est une formule Grist.
+// Fiche de saisie (1 a 3 lignes selon periodicite)
 // ---------------------------------------------------------------
 function libelleTampon(statut) {
-  if (statut === 'Fiabilisée BPATE') return { classe: 'fiabilisee', texte: 'FIABILISÉE BPATE' };
+  if (statut === 'Fiabilisée BPATE') return { classe: 'fiabilisee', texte: 'FIABILISÉE' };
   if (statut === 'Consolidée') return { classe: 'consolidee', texte: 'CONSOLIDÉE' };
-  if (statut === 'En cours de saisie') return { classe: 'encours', texte: 'EN COURS DE SAISIE' };
-  return { classe: '', texte: 'À SAISIR' };
+  if (statut === 'En cours de saisie') return { classe: 'encours', texte: 'EN COURS' };
+  return { classe: 'attente', texte: 'À SAISIR' };
 }
 
-async function afficherFiche(id) {
-  ligneSelectionneeId = id;
-  const ligne = lignesFiltrees.find(l => l.id === id);
-  if (!ligne) return;
+function infoBulle(texte) {
+  return `<span class="info-bulle">i<span class="bulle-texte">${texte}</span></span>`;
+}
 
-  document.querySelectorAll('table.liste tr').forEach(tr => {
-    tr.classList.toggle('actif', Number(tr.dataset.id) === id);
+async function afficherFiche(index) {
+  groupeSelectionne = index;
+  const groupe = groupesFiltres[index];
+  if (!groupe) return;
+  const premiere = groupe[0];
+
+  document.querySelectorAll('.item').forEach(el => {
+    el.classList.toggle('actif', Number(el.dataset.index) === index);
   });
 
-  const tampon = libelleTampon(ligne.Statut);
+  const alerteData = premiere.DATA_ATE ? `<span class="badge alerte">${premiere.DATA_ATE}${infoBulle(INFOBULLES.dataAte)}</span>` : '';
+  const badgePap = premiere.PAP ? `<span class="badge pap">${premiere.PAP}${infoBulle(INFOBULLES.pap)}</span>` : '';
+  const infoBpate = premiere.Donnee_transmise_par_la_direction_metier
+    ? `<span class="badge info">${premiere.Donnee_transmise_par_la_direction_metier}${infoBulle(INFOBULLES.transmisBpate)}</span>` : '';
 
-  const idsFiche = idsPieceJointe(ligne.Fiche_indicateur);
+  const idsFiche = idsPieceJointe(premiere.Fiche_indicateur);
   let lienFiche = '';
   if (idsFiche.length > 0) {
     const url = await urlPieceJointe(idsFiche[0]);
     lienFiche = url ? `<a class="lien-fiche" href="${url}" target="_blank" rel="noopener">📄 Fiche technique</a>` : '';
+  } else if (premiere.Fiche_message) {
+    lienFiche = `<div style="font-size:12px;color:var(--texte-secondaire);margin-bottom:10px">${premiere.Fiche_message}</div>`;
   }
+
+  const afficherValeurFinale = premiere.Type_cible === 'DE_Performance' &&
+    groupe.some(l => l.Valeur_finale !== null && l.Valeur_finale !== '' && Number(l.Valeur_finale) !== Number(l.Valeur));
+
+  const lignesTableau = groupe.map(l => {
+    const tampon = libelleTampon(l.Statut);
+    const valeurFinaleLigne = (afficherValeurFinale && l.Valeur_finale !== null && l.Valeur_finale !== '')
+      ? `<div class="valeur-finale">Valeur finale : <strong>${l.Valeur_finale}</strong></div>` : '';
+    const lectureSeule = l.Statut === 'Fiabilisée BPATE';
+    return `
+      <tr data-ligne-id="${l.id}">
+        <td>${l.Periode_valeur} ${l.Annee}</td>
+        <td>
+          <input type="text" class="champ-valeur" value="${l.Valeur ?? ''}" ${lectureSeule ? 'disabled' : ''}>
+          ${valeurFinaleLigne}
+        </td>
+        <td><span class="tampon-ligne ${tampon.classe}">${tampon.texte}</span></td>
+        <td><textarea class="champ-commentaire" rows="1" ${lectureSeule ? 'disabled' : ''}>${l.Commentaire ?? ''}</textarea></td>
+      </tr>`;
+  }).join('');
 
   document.getElementById('panel-fiche').innerHTML = `
     <div class="fiche">
-      <div class="fiche-titre">${ligne.Indicateur_Libelle || ''}</div>
-      <div class="fiche-service">${nomService(ligne.Service)} · ${ligne.Periode_valeur} ${ligne.Annee}</div>
-      <div class="tampon-mini ${tampon.classe}">${tampon.texte}</div>
+      <div class="fiche-entete">
+        <div>
+          <div class="fiche-code">${premiere.Type_cible}</div>
+          <div class="fiche-titre">${premiere.Indicateur_Libelle || ''}</div>
+        </div>
+      </div>
+      <div style="margin-bottom:10px">${badgePap}${alerteData}${infoBpate}</div>
       ${lienFiche}
 
-      <div class="champ">
-        <label>Valeur</label>
-        <input type="text" id="champ-valeur" value="${ligne.Valeur ?? ''}">
-      </div>
-      <div class="champ">
-        <label>Commentaire</label>
-        <textarea id="champ-commentaire" rows="3">${ligne.Commentaire ?? ''}</textarea>
-      </div>
+      <table class="lignes-periode">
+        <thead>
+          <tr>
+            <th>Période</th>
+            <th>Valeur ${infoBulle(INFOBULLES.valeur)}</th>
+            <th>Statut ${infoBulle(INFOBULLES.statut)}</th>
+            <th>Commentaire ${infoBulle(INFOBULLES.commentaire)}</th>
+          </tr>
+        </thead>
+        <tbody>${lignesTableau}</tbody>
+      </table>
 
-      <label class="case-surveiller">
-        <input type="checkbox" id="case-a-surveiller" ${ligne.A_surveiller ? 'checked' : ''}>
-        Marquer comme "à surveiller" (hors cible / dégradé)
-      </label>
-
-      <button class="btn-save" id="btn-enregistrer">Enregistrer</button>
+      <div class="pied">
+        <span class="auteur">Dernière saisie : ${premiere.Auteur || '-'} ${premiere.Date_Saisie ? '· ' + new Date(premiere.Date_Saisie * 1000).toLocaleDateString('fr-FR') : ''}</span>
+        <button class="btn" id="btn-enregistrer">Enregistrer</button>
+      </div>
       <div id="zone-message"></div>
 
       <div class="bloc-historique">
         <h3>Historique de la donnée (12 derniers mois)</h3>
         <div id="histo-donnee"><div class="histo-vide">Chargement...</div></div>
-        ${ligne.Type_cible === 'DE_Performance' ? `
-        <h3 style="margin-top:14px" id="titre-histo-indicateur">Historique de l'indicateur associé (12 derniers mois)</h3>
+        ${premiere.Type_cible === 'DE_Performance' ? `
+        <h3 style="margin-top:16px">Historique de l'indicateur associé (12 derniers mois)</h3>
         <div id="histo-indicateur"><div class="histo-vide">Chargement...</div></div>` : ''}
       </div>
     </div>
   `;
 
-  document.getElementById('btn-enregistrer').addEventListener('click', () => enregistrerLigne(ligne));
-  afficherHistoriqueDonnee(ligne);
-  if (ligne.Type_cible === 'DE_Performance') afficherHistoriqueIndicateur(ligne);
+  document.getElementById('btn-enregistrer').addEventListener('click', () => enregistrerGroupe(groupe));
+  afficherHistoriqueDonnee(premiere);
+  if (premiere.Type_cible === 'DE_Performance') afficherHistoriqueIndicateur(premiere);
 }
 
-async function enregistrerLigne(ligne) {
+// ---------------------------------------------------------------
+// Enregistrement d'un groupe (1 a 3 lignes)
+// Le Statut n'est plus ecrit par le widget : c'est desormais une
+// formule Grist (voir instructions en tete de fichier). On se
+// contente d'ecrire Valeur et Commentaire.
+// ---------------------------------------------------------------
+async function enregistrerGroupe(groupe) {
   const bouton = document.getElementById('btn-enregistrer');
   const zoneMessage = document.getElementById('zone-message');
   bouton.disabled = true;
 
-  const valeur = document.getElementById('champ-valeur').value;
-  const commentaire = document.getElementById('champ-commentaire').value;
-  const aSurveiller = document.getElementById('case-a-surveiller').checked;
+  const actions = [];
+  document.querySelectorAll('#panel-fiche tr[data-ligne-id]').forEach(tr => {
+    const ligneId = Number(tr.dataset.ligneId);
+    const champValeur = tr.querySelector('.champ-valeur');
+    const champCommentaire = tr.querySelector('.champ-commentaire');
+    if (champValeur.disabled) return; // ligne fiabilisee BPATE : non modifiable
+    const valeur = champValeur.value;
+    const commentaire = champCommentaire.value;
+    actions.push(['UpdateRecord', 'SAISIES', ligneId, {
+      Valeur: valeur === '' ? null : Number(valeur),
+      Commentaire: commentaire
+    }]);
+  });
+
+  if (actions.length === 0) {
+    zoneMessage.innerHTML = '<div class="message-etat erreur">Aucune ligne modifiable dans ce groupe (deja fiabilisee).</div>';
+    bouton.disabled = false;
+    return;
+  }
 
   try {
-    await grist.docApi.applyUserActions([
-      ['UpdateRecord', 'SAISIES', ligne.id, {
-        Valeur: valeur === '' ? null : Number(valeur),
-        Commentaire: commentaire,
-        A_surveiller: aSurveiller
-      }]
-    ]);
+    await grist.docApi.applyUserActions(actions);
     zoneMessage.innerHTML = '<div class="message-etat succes">Enregistré</div>';
     await chargerDonnees();
+    const serviceId = document.getElementById('select-service').value;
+    filtrerEtAfficherListe(serviceId);
   } catch (erreur) {
     zoneMessage.innerHTML = `<div class="message-etat erreur">Erreur : ${erreur.message}</div>`;
   } finally {
@@ -649,20 +732,34 @@ async function enregistrerLigne(ligne) {
 }
 
 // ---------------------------------------------------------------
-// Historique (identique au widget SAISIE)
+// Historique : tableau + petit graphe SVG (pas de dependance externe)
+// Fenetre : 1 an glissant.
 // ---------------------------------------------------------------
-function ilYAUnAn() { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d; }
-function periodeRecente(annee) { return annee >= ilYAUnAn().getFullYear(); }
+function ilYAUnAn() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  return d;
+}
+
+// Comparaison grossiere de periode (Annee + rang du mois/trimestre) pour
+// filtrer les 12 derniers mois sans avoir besoin d'une vraie date Grist.
+function periodeRecente(annee, periodeValeur) {
+  const limite = ilYAUnAn();
+  const anneeLimite = limite.getFullYear();
+  if (annee > anneeLimite) return true;
+  if (annee < anneeLimite) return false;
+  return true; // meme annee que la limite : on garde (approximation raisonnable)
+}
 
 function dessinerMiniGraphe(valeurs) {
   if (valeurs.length === 0) return '';
   const max = Math.max(...valeurs, 1);
-  const largeurBarre = 22;
-  const largeur = valeurs.length * (largeurBarre + 5);
-  const hauteur = 50;
+  const largeurBarre = 24;
+  const largeur = valeurs.length * (largeurBarre + 6);
+  const hauteur = 60;
   const barres = valeurs.map((v, i) => {
     const h = Math.max(2, (v / max) * (hauteur - 6));
-    const x = i * (largeurBarre + 5);
+    const x = i * (largeurBarre + 6);
     const y = hauteur - h;
     return `<rect x="${x}" y="${y}" width="${largeurBarre}" height="${h}" fill="#000091" rx="2"/>`;
   }).join('');
@@ -671,202 +768,92 @@ function dessinerMiniGraphe(valeurs) {
 
 function afficherHistoriqueDonnee(ligne) {
   const conteneur = document.getElementById('histo-donnee');
-  const clefRef = ligne.Type_cible === 'DE_Performance' ? 'Ref_DE_Performance'
-    : ligne.Type_cible === 'DE_Qualite' ? 'Ref_DE_Qualite' : 'Ref_Indicateur_Qualite';
-  const lignesHisto = TABLES.saisies.filter(l =>
-    l[clefRef] === ligne[clefRef] && l.Service === ligne.Service &&
-    l.Statut === 'Fiabilisée BPATE' && periodeRecente(l.Annee)
-  );
+  let lignesHisto = [];
+  if (ligne.Type_cible === 'DE_Performance') {
+    lignesHisto = TABLES.saisies.filter(l =>
+      l.Ref_DE_Performance === ligne.Ref_DE_Performance &&
+      l.Service === ligne.Service &&
+      l.Statut === 'Fiabilisée BPATE' &&
+      periodeRecente(l.Annee, l.Periode_valeur)
+    );
+  } else if (ligne.Type_cible === 'DE_Qualite') {
+    lignesHisto = TABLES.saisies.filter(l =>
+      l.Ref_DE_Qualite === ligne.Ref_DE_Qualite &&
+      l.Service === ligne.Service &&
+      l.Statut === 'Fiabilisée BPATE' &&
+      periodeRecente(l.Annee, l.Periode_valeur)
+    );
+  } else {
+    lignesHisto = TABLES.saisies.filter(l =>
+      l.Ref_Indicateur_Qualite === ligne.Ref_Indicateur_Qualite &&
+      l.Service === ligne.Service &&
+      l.Statut === 'Fiabilisée BPATE' &&
+      periodeRecente(l.Annee, l.Periode_valeur)
+    );
+  }
+
   if (lignesHisto.length === 0) {
     conteneur.innerHTML = '<div class="histo-vide">Pas encore de valeur fiabilisée sur les 12 derniers mois.</div>';
     return;
   }
+
   lignesHisto.sort((a, b) => a.Annee - b.Annee || MOIS_ORDRE.indexOf(a.Periode_valeur) - MOIS_ORDRE.indexOf(b.Periode_valeur));
   const tableau = `<table class="histo-tableau"><thead><tr><th>Période</th><th>Valeur</th></tr></thead><tbody>
     ${lignesHisto.map(l => `<tr><td>${l.Periode_valeur} ${l.Annee}</td><td>${l.Valeur}</td></tr>`).join('')}
   </tbody></table>`;
-  conteneur.innerHTML = tableau + dessinerMiniGraphe(lignesHisto.map(l => Number(l.Valeur) || 0));
+  const graphe = dessinerMiniGraphe(lignesHisto.map(l => Number(l.Valeur) || 0));
+  conteneur.innerHTML = tableau + graphe;
 }
 
 function afficherHistoriqueIndicateur(ligne) {
   const conteneur = document.getElementById('histo-indicateur');
-  const titre = document.getElementById('titre-histo-indicateur');
   const liens = TABLES.indicateurDe2.filter(l => l.Donnee_elementaire === ligne.Ref_DE_Performance);
   if (liens.length === 0) {
-    conteneur.innerHTML = '<div class="histo-vide">Non rattachée à un indicateur (INDICATEUR_DE2).</div>';
+    conteneur.innerHTML = '<div class="histo-vide">Cette donnée n\'est pas encore rattachée à un indicateur (INDICATEUR_DE2).</div>';
     return;
   }
   const indicateurId = liens[0].Indicateur;
-  const indicateur = TABLES.indicPerf.find(ip => ip.id === indicateurId);
-  if (titre && indicateur) {
-    titre.textContent = `Historique de l'indicateur associé — ${indicateur.Code || ''} : ${indicateur.Libelle || ''} (12 derniers mois)`;
-  }
-  const resultats = TABLES.resultatsIndicateurs.filter(r => r.Indicateur_Performance === indicateurId && periodeRecente(r.Annee));
+  const resultats = TABLES.resultatsIndicateurs.filter(r =>
+    r.Indicateur_Performance === indicateurId && periodeRecente(r.Annee, r.Periode_valeur)
+  );
   if (resultats.length === 0) {
     conteneur.innerHTML = '<div class="histo-vide">Pas encore de résultat consolidé sur les 12 derniers mois.</div>';
     return;
   }
   resultats.sort((a, b) => a.Annee - b.Annee);
-  const tableau = `<table class="histo-tableau"><thead><tr><th>Période</th><th>Valeur</th></tr></thead><tbody>
-    ${resultats.map(r => `<tr><td>${r.Periode_valeur} ${r.Annee}</td><td>${r.Valeur}</td></tr>`).join('')}
+  const tableau = `<table class="histo-tableau"><thead><tr><th>Période</th><th>Valeur</th><th>Statut</th></tr></thead><tbody>
+    ${resultats.map(r => `<tr><td>${r.Periode_valeur} ${r.Annee}</td><td>${r.Valeur}</td><td>${r.Statut || ''}</td></tr>`).join('')}
   </tbody></table>`;
-  conteneur.innerHTML = tableau + dessinerMiniGraphe(resultats.map(r => Number(r.Valeur) || 0));
+  const graphe = dessinerMiniGraphe(resultats.map(r => Number(r.Valeur) || 0));
+  conteneur.innerHTML = tableau + graphe;
 }
 
 // ---------------------------------------------------------------
-// RELANCES : apercu des services non-remplis pour la periode filtree,
-// avec un lien mailto: pre-rempli (pas d'envoi automatique tant que
-// le webhook n8n n'est pas debloque, mais ca fonctionne des maintenant
-// via ta messagerie habituelle)
+// EXPORT : modale de selection puis generation ODS + PDF
 // ---------------------------------------------------------------
-document.getElementById('btn-relances').addEventListener('click', ouvrirModaleRelances);
-
-function ouvrirModaleRelances() {
-  const parService = new Map();
-  lignesFiltrees.forEach(l => {
-    if (l.Valeur !== null && l.Valeur !== '' && l.Valeur !== undefined) return;
-    if (!parService.has(l.Service)) parService.set(l.Service, []);
-    parService.get(l.Service).push(l);
-  });
-
-  const contenu = Array.from(parService.entries()).map(([serviceId, lignes]) => {
-    const contacts = UTILISATEURS.filter(u => u.Actif && (u.Service || []).includes(serviceId));
-    const emails = contacts.map(u => u.Email).filter(Boolean);
-    const sujet = encodeURIComponent(`Relance saisie indicateurs - ${nomService(serviceId)}`);
-    const corps = encodeURIComponent(
-      `Bonjour,\n\nIl reste ${lignes.length} indicateur(s) à saisir pour votre service sur la période en cours :\n` +
-      lignes.map(l => `- ${l.Indicateur_Libelle}`).join('\n') +
-      `\n\nMerci de compléter la saisie dès que possible.\n\nCordialement,\nCellule Qualité`
-    );
-    const lienMail = emails.length > 0
-      ? `<a class="lien-mail" href="mailto:${emails.join(',')}?subject=${sujet}&body=${corps}">✉️ Ouvrir un brouillon (${emails.length} destinataire(s))</a>`
-      : '<div style="color:var(--orange);font-size:12px">Aucun contact actif trouvé pour ce service dans Utilisateurs_Services.</div>';
-    return `
-      <div class="relance-service">
-        <div class="titre-service">${nomService(serviceId)} — ${lignes.length} indicateur(s) manquant(s)</div>
-        ${lienMail}
-      </div>`;
-  }).join('') || '<div class="histo-vide">Tous les indicateurs de la période filtrée sont saisis.</div>';
-
-  document.getElementById('zone-modale').innerHTML = `
-    <div class="voile" id="voile-relances">
-      <div class="modale">
-        <h2>Relances — indicateurs non remplis</h2>
-        <div class="avertissement-import">
-          L'envoi automatique par mail est en attente du webhook n8n (support DINUM).
-          En attendant, chaque bouton ouvre un brouillon dans votre messagerie habituelle,
-          déjà adressé et rédigé — il ne reste qu'à cliquer sur Envoyer.
-        </div>
-        ${contenu}
-        <div class="modale-pied"><button class="btn pleine" id="btn-fermer-relances" style="color:#fff">Fermer</button></div>
-      </div>
-    </div>`;
-  document.getElementById('btn-fermer-relances').addEventListener('click', () => document.getElementById('zone-modale').innerHTML = '');
-  document.getElementById('voile-relances').addEventListener('click', (e) => { if (e.target.id === 'voile-relances') document.getElementById('zone-modale').innerHTML = ''; });
-}
-
-// ---------------------------------------------------------------
-// IMPORT BPATE : lecture + apercu uniquement (pas d'ecriture Grist
-// tant que le mapping n'est pas valide - cf instructions en tete)
-// ---------------------------------------------------------------
-document.getElementById('btn-import-bpate').addEventListener('click', ouvrirModaleImport);
-
-function ouvrirModaleImport() {
-  document.getElementById('zone-modale').innerHTML = `
-    <div class="voile" id="voile-import">
-      <div class="modale">
-        <h2>Importer les données BPATE</h2>
-        <div class="avertissement-import">
-          Cette version affiche uniquement un aperçu du fichier : aucune donnée n'est encore
-          écrite dans Grist. L'écriture automatique sera activée une fois le format du fichier
-          BPATE validé (chantier en cours en parallèle).
-        </div>
-        <div class="zone-import">
-          <input type="file" id="champ-fichier-bpate" accept=".xlsx,.xls,.csv">
-          <div style="margin-top:8px">Sélectionnez le fichier trimestriel transmis par le BPATE</div>
-        </div>
-        <div id="zone-apercu-import"></div>
-        <div class="modale-pied"><button class="btn pleine" id="btn-fermer-import" style="color:#fff">Fermer</button></div>
-      </div>
-    </div>`;
-  document.getElementById('champ-fichier-bpate').addEventListener('change', previsualiserFichierBpate);
-  document.getElementById('btn-fermer-import').addEventListener('click', () => document.getElementById('zone-modale').innerHTML = '');
-  document.getElementById('voile-import').addEventListener('click', (e) => { if (e.target.id === 'voile-import') document.getElementById('zone-modale').innerHTML = ''; });
-}
-
-function previsualiserFichierBpate(e) {
-  const fichier = e.target.files[0];
-  if (!fichier) return;
-  const lecteur = new FileReader();
-  lecteur.onload = (evt) => {
-    try {
-      const donnees = new Uint8Array(evt.target.result);
-      const classeur = XLSX.read(donnees, { type: 'array' });
-      const premierOnglet = classeur.Sheets[classeur.SheetNames[0]];
-      const lignes = XLSX.utils.sheet_to_json(premierOnglet, { header: 1, defval: '' });
-      const enTetes = lignes[0] || [];
-      const corpsApercu = lignes.slice(1, 21); // 20 premieres lignes
-
-      document.getElementById('zone-apercu-import').innerHTML = `
-        <div style="margin-top:14px;font-size:12.5px">
-          <strong>${classeur.SheetNames[0]}</strong> — ${lignes.length - 1} ligne(s) détectée(s), aperçu des 20 premières :
-        </div>
-        <div style="overflow-x:auto">
-          <table class="apercu-tableau">
-            <thead><tr>${enTetes.map(h => `<th>${h}</th>`).join('')}</tr></thead>
-            <tbody>${corpsApercu.map(ligne => `<tr>${ligne.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
-          </table>
-        </div>`;
-    } catch (err) {
-      document.getElementById('zone-apercu-import').innerHTML = `<div class="message-etat erreur">Fichier illisible : ${err.message}</div>`;
-    }
-  };
-  lecteur.readAsArrayBuffer(fichier);
-}
-
-// ---------------------------------------------------------------
-// EXPORT : modale avec presets + selection libre, ODS/PDF,
-// comparaison regionale/autres departements (meme mecanique que
-// le widget SAISIE, etendue a toutes les lignes filtrees)
-// ---------------------------------------------------------------
-document.getElementById('btn-ouvrir-export').addEventListener('click', ouvrirModaleExport);
-
-function echapperXml(texte) {
-  return String(texte ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 function ouvrirModaleExport() {
-  const departementsAutres = TABLES.departements.filter(d => d.Code !== '04');
+  const serviceId = document.getElementById('select-service').value;
+  if (!serviceId) return;
 
   document.getElementById('zone-modale').innerHTML = `
     <div class="voile" id="voile-export">
       <div class="modale">
-        <h2>Exporter</h2>
-        <div class="presets">
-          <button class="btn-preset" data-preset="pap">PAP</button>
-          <button class="btn-preset" data-preset="qualite">Qualité</button>
-          <button class="btn-preset" data-preset="service">Par service (sélection en cours)</button>
-          <button class="btn-preset" data-preset="sgar">Export SGAR</button>
-          <button class="btn-preset" data-preset="sg">Export Secrétaire général</button>
-        </div>
+        <h2>Exporter mes données</h2>
 
         <div class="modale-section">
-          <label>Données à exporter (${lignesFiltrees.length} lignes selon les filtres actifs)</label>
+          <label>Données à exporter</label>
           <div class="liste-check" id="check-donnees">
-            ${lignesFiltrees.map((l, i) => `
+            ${groupesFiltres.map((g, i) => `
               <label class="ligne-check">
                 <input type="checkbox" value="${i}" checked>
-                ${nomService(l.Service)} — ${l.Indicateur_Libelle || '(libellé indisponible)'}
+                ${g[0].Indicateur_Libelle || '(libellé indisponible)'}
               </label>`).join('')}
           </div>
         </div>
 
         <div class="modale-section">
-          <label><input type="checkbox" id="check-comparaison"> Comparer avec d'autres départements / la région</label>
-          <div class="liste-check" id="check-departements" style="display:none;margin-top:6px">
-            ${departementsAutres.map(d => `
-              <label class="ligne-check"><input type="checkbox" value="${d.id}">${d.Libelle} (${d.Region || ''})</label>`).join('')}
-          </div>
+          <label>Période</label>
+          <div>${PARAMETRES ? PARAMETRES.Periode_active + ' ' + PARAMETRES.Annee_active : ''} (période en cours)</div>
         </div>
 
         <div class="modale-section">
@@ -878,101 +865,77 @@ function ouvrirModaleExport() {
         </div>
 
         <div class="modale-pied">
-          <button class="btn" id="btn-annuler-export" style="color:var(--bleu);background:#f0f0f0">Annuler</button>
-          <button class="btn pleine" id="btn-generer-export" style="color:#fff">Générer</button>
+          <button class="btn secondaire" id="btn-annuler-export">Annuler</button>
+          <button class="btn" id="btn-generer-export">Générer</button>
         </div>
         <div id="message-export"></div>
       </div>
     </div>`;
 
-  document.getElementById('check-comparaison').addEventListener('change', (e) => {
-    document.getElementById('check-departements').style.display = e.target.checked ? '' : 'none';
+  document.getElementById('btn-annuler-export').addEventListener('click', fermerModaleExport);
+  document.getElementById('voile-export').addEventListener('click', (e) => {
+    if (e.target.id === 'voile-export') fermerModaleExport();
   });
-  document.getElementById('btn-annuler-export').addEventListener('click', () => document.getElementById('zone-modale').innerHTML = '');
-  document.getElementById('voile-export').addEventListener('click', (e) => { if (e.target.id === 'voile-export') document.getElementById('zone-modale').innerHTML = ''; });
   document.getElementById('btn-generer-export').addEventListener('click', genererExport);
-
-  document.querySelectorAll('.btn-preset').forEach(btn => {
-    btn.addEventListener('click', () => appliquerPresetExport(btn.dataset.preset));
-  });
 }
 
-function appliquerPresetExport(preset) {
-  const cases = document.querySelectorAll('#check-donnees input[type=checkbox]');
-  cases.forEach((c, i) => {
-    const l = lignesFiltrees[i];
-    let coche = true;
-    if (preset === 'pap') coche = !!l.PAP;
-    else if (preset === 'qualite') coche = estIndicateurQualite(l);
-    else if (preset === 'sgar' || preset === 'sg') {
-      // Focus indicateurs sous cible / degrades / impact qualite service :
-      // combine A_surveiller (manuel), variation forte (auto), et le
-      // marquage Impact_qualite_service sur l'indicateur Performance lie.
-      const indicLie = l.Type_cible === 'DE_Performance'
-        ? TABLES.indicateurDe2.filter(x => x.Donnee_elementaire === l.Ref_DE_Performance).map(x => TABLES.indicPerf.find(ip => ip.id === x.Indicateur)).filter(Boolean)
-        : [];
-      const impactQualite = indicLie.some(ip => ip.Impact_qualite_service);
-      coche = !!l.A_surveiller || variationForte(l) || impactQualite;
-    }
-    c.checked = coche;
-  });
+function fermerModaleExport() {
+  document.getElementById('zone-modale').innerHTML = '';
+}
+
+function echapperXml(texte) {
+  return String(texte ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 async function genererExport() {
   const messageExport = document.getElementById('message-export');
   const indicesChoisis = Array.from(document.querySelectorAll('#check-donnees input:checked')).map(c => Number(c.value));
-  const lignesChoisies = indicesChoisis.map(i => lignesFiltrees[i]).filter(Boolean);
+  const groupesChoisis = indicesChoisis.map(i => groupesFiltres[i]).filter(Boolean);
 
-  if (lignesChoisies.length === 0) {
+  if (groupesChoisis.length === 0) {
     messageExport.innerHTML = '<div class="message-etat erreur">Sélectionnez au moins une donnée.</div>';
     return;
   }
 
-  const lignesService = lignesChoisies.map(l => ({
-    territoire: nomService(l.Service),
+  // Lignes "service" : une ligne par SAISIES du groupe choisi
+  const lignesService = groupesChoisis.flatMap(g => g.map(l => ({
+    territoire: 'Préfecture 04 (mon service)',
     indicateur: l.Indicateur_Libelle,
     periode: `${l.Periode_valeur} ${l.Annee}`,
     valeur: l.Valeur_finale ?? l.Valeur,
     statut: l.Statut || 'À saisir',
     commentaire: l.Commentaire || ''
-  }));
+  })));
 
-  let lignesComparaison = [];
-  if (document.getElementById('check-comparaison').checked) {
-    const departementsChoisis = Array.from(document.querySelectorAll('#check-departements input:checked')).map(c => Number(c.value));
-    const indicateursConcernes = new Set();
-    lignesChoisies.forEach(l => {
-      if (l.Type_cible !== 'DE_Performance') return;
-      TABLES.indicateurDe2.filter(x => x.Donnee_elementaire === l.Ref_DE_Performance).forEach(x => indicateursConcernes.add(x.Indicateur));
-    });
-    lignesComparaison = TABLES.resultatsIndicateurs
-      .filter(r => indicateursConcernes.has(r.Indicateur_Performance) && departementsChoisis.includes(r.Departement))
-      .map(r => {
-        const dep = TABLES.departements.find(d => d.id === r.Departement);
-        const indic = TABLES.indicPerf.find(ip => ip.id === r.Indicateur_Performance);
-        return { territoire: dep ? dep.Libelle : '', indicateur: indic ? indic.Libelle : '', periode: `${r.Periode_valeur} ${r.Annee}`, valeur: r.Valeur, statut: r.Statut || '', commentaire: '' };
-      });
-  }
-
-  const toutesLesLignes = [...lignesService, ...lignesComparaison];
+  const toutesLesLignes = [...lignesService];
   const format = document.querySelector('input[name="format-export"]:checked').value;
-  const annee = document.getElementById('select-annee').value;
-  const typePeriode = document.getElementById('select-type-periode').value;
-  const periodeValeur = document.getElementById('select-periode-valeur').value;
-  const titre = `${typePeriode}_${periodeValeur}_${annee}`;
+  const select = document.getElementById('select-service');
+  const serviceLabel = select.options[select.selectedIndex].text;
+  const periodeLabel = PARAMETRES ? `${PARAMETRES.Periode_active}_${PARAMETRES.Annee_active}` : '';
 
   try {
-    if (format === 'ods') await genererODS(toutesLesLignes, titre);
-    else await genererPDF(toutesLesLignes, titre);
-    document.getElementById('zone-modale').innerHTML = '';
+    if (format === 'ods') {
+      await genererODS(toutesLesLignes, serviceLabel, periodeLabel);
+    } else {
+      await genererPDF(toutesLesLignes, serviceLabel, periodeLabel);
+    }
+    fermerModaleExport();
   } catch (e) {
     messageExport.innerHTML = `<div class="message-etat erreur">Erreur : ${e.message}</div>`;
   }
 }
 
-async function genererODS(lignes, titre) {
+// --- Generation ODS (feuille de calcul OpenDocument, via JSZip) ---
+async function genererODS(lignes, serviceLabel, periodeLabel) {
   const entetes = ['Territoire', 'Indicateur', 'Période', 'Valeur', 'Statut', 'Commentaire'];
-  const ligneEntete = '<table:table-row>' + entetes.map(e => `<table:table-cell office:value-type="string"><text:p>${echapperXml(e)}</text:p></table:table-cell>`).join('') + '</table:table-row>';
+  const ligneEntete = '<table:table-row>' + entetes.map(e =>
+    `<table:table-cell office:value-type="string"><text:p>${echapperXml(e)}</text:p></table:table-cell>`
+  ).join('') + '</table:table-row>';
+
   const lignesXml = lignes.map(l => {
     const valeurs = [l.territoire, l.indicateur, l.periode, l.valeur, l.statut, l.commentaire];
     return '<table:table-row>' + valeurs.map(v => {
@@ -985,10 +948,16 @@ async function genererODS(lignes, titre) {
 
   const contentXml = `<?xml version="1.0" encoding="UTF-8"?>
 <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2">
-<office:body><office:spreadsheet><table:table table:name="Indicateurs">
+<office:body>
+<office:spreadsheet>
+<table:table table:name="Indicateurs">
 ${entetes.map(() => '<table:table-column/>').join('')}
-${ligneEntete}${lignesXml}
-</table:table></office:spreadsheet></office:body></office:document-content>`;
+${ligneEntete}
+${lignesXml}
+</table:table>
+</office:spreadsheet>
+</office:body>
+</office:document-content>`;
 
   const manifestXml = `<?xml version="1.0" encoding="UTF-8"?>
 <manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
@@ -1000,40 +969,45 @@ ${ligneEntete}${lignesXml}
   zip.file('mimetype', 'application/vnd.oasis.opendocument.spreadsheet', { compression: 'STORE' });
   zip.folder('META-INF').file('manifest.xml', manifestXml);
   zip.file('content.xml', contentXml);
+
   const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.oasis.opendocument.spreadsheet' });
-  telechargerBlob(blob, `indicateurs_${nettoyerNomFichier(titre)}.ods`);
+  telechargerBlob(blob, `indicateurs_${nettoyerNomFichier(serviceLabel)}_${periodeLabel}.ods`);
 }
 
-async function genererPDF(lignes, titre) {
+// --- Generation PDF (jsPDF + autotable, avec le bloc prefete/prefet) ---
+async function genererPDF(lignes, serviceLabel, periodeLabel) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
 
+  // Bloc prefete/prefet en en-tete si disponible
   const cartouche = TABLES.cartouche[0];
   if (cartouche) {
     const ids = idsPieceJointe(cartouche.BLOC_PREFETE);
     if (ids.length > 0) {
-      const genre = (PARAMETRES && PARAMETRES.Genre_prefet) || 'Préfète';
-      const indice = (ids.length > 1 && genre === 'Préfet') ? 1 : 0;
+      const indice = (ids.length > 1 && PARAMETRES && PARAMETRES.Genre_prefet === 'Préfet') ? 1 : 0;
       const dataUrl = await pieceJointeEnBase64(ids[Math.min(indice, ids.length - 1)]);
-      if (dataUrl) { try { doc.addImage(dataUrl, 'PNG', 14, 10, 28, 28); } catch (e) { console.warn(e); } }
+      if (dataUrl) {
+        try { doc.addImage(dataUrl, 'PNG', 14, 10, 28, 28); } catch (e) { console.warn('Image non inseree dans le PDF :', e); }
+      }
     }
   }
 
   doc.setFontSize(14);
   doc.text('Indicateurs qualité - performance', 50, 20);
   doc.setFontSize(10);
-  doc.text(`Période : ${titre.replace(/_/g, ' ')}`, 50, 27);
-  doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, 50, 33);
+  doc.text(`Service : ${serviceLabel}`, 50, 27);
+  doc.text(`Période : ${periodeLabel.replace('_', ' ')}`, 50, 33);
+  doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, 50, 39);
 
   doc.autoTable({
-    startY: 42,
+    startY: 46,
     head: [['Territoire', 'Indicateur', 'Période', 'Valeur', 'Statut', 'Commentaire']],
     body: lignes.map(l => [l.territoire, l.indicateur, l.periode, String(l.valeur ?? ''), l.statut, l.commentaire]),
     styles: { fontSize: 8 },
     headStyles: { fillColor: [0, 0, 145] }
   });
 
-  doc.save(`indicateurs_${nettoyerNomFichier(titre)}.pdf`);
+  doc.save(`indicateurs_${nettoyerNomFichier(serviceLabel)}_${periodeLabel}.pdf`);
 }
 
 function telechargerBlob(blob, nomFichier) {
@@ -1047,7 +1021,11 @@ function telechargerBlob(blob, nomFichier) {
   URL.revokeObjectURL(url);
 }
 
-function nettoyerNomFichier(texte) { return String(texte).replace(/[^a-zA-Z0-9]+/g, '_'); }
+function nettoyerNomFichier(texte) {
+  return String(texte).replace(/[^a-zA-Z0-9]+/g, '_');
+}
+
+document.getElementById('btn-ouvrir-export').addEventListener('click', ouvrirModaleExport);
 
 chargerDonnees();
 </script>
