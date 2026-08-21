@@ -384,7 +384,7 @@ grist.ready({ requiredAccess: 'full' });
 async function chargerDonnees() {
   const [saisies, services, parametres, indicPerf, donneesElem, indicQualite,
          donneesElemQualite, deDcl, indicateurDe2, resultatsIndicateurs,
-         departements, cartouche] = await Promise.all([
+         cartouche] = await Promise.all([
     grist.docApi.fetchTable('SAISIES'),
     grist.docApi.fetchTable('SERVICES'),
     grist.docApi.fetchTable('PARAMETRES'),
@@ -395,7 +395,6 @@ async function chargerDonnees() {
     grist.docApi.fetchTable('DE_DCL'),
     grist.docApi.fetchTable('INDICATEUR_DE2'),
     grist.docApi.fetchTable('RESULTATS_INDICATEURS'),
-    grist.docApi.fetchTable('DEPARTEMENTS'),
     grist.docApi.fetchTable('CARTOUCHE_INFO')
   ]);
 
@@ -408,7 +407,6 @@ async function chargerDonnees() {
     deDcl: tableEnLignes(deDcl),
     indicateurDe2: tableEnLignes(indicateurDe2),
     resultatsIndicateurs: tableEnLignes(resultatsIndicateurs),
-    departements: tableEnLignes(departements),
     cartouche: tableEnLignes(cartouche)
   };
   // Note : SERVICES.Actif est une formule vide dans ce document (toujours
@@ -861,8 +859,6 @@ function ouvrirModaleExport() {
   const serviceId = document.getElementById('select-service').value;
   if (!serviceId) return;
 
-  const departementsAutres = TABLES.departements.filter(d => d.Code !== '04');
-
   document.getElementById('zone-modale').innerHTML = `
     <div class="voile" id="voile-export">
       <div class="modale">
@@ -885,17 +881,6 @@ function ouvrirModaleExport() {
         </div>
 
         <div class="modale-section">
-          <label><input type="checkbox" id="check-comparaison"> Comparer avec d'autres départements / la région</label>
-          <div class="liste-check" id="check-departements" style="display:none;margin-top:6px">
-            ${departementsAutres.map(d => `
-              <label class="ligne-check">
-                <input type="checkbox" value="${d.id}">
-                ${d.Libelle} (${d.Region || ''})
-              </label>`).join('')}
-          </div>
-        </div>
-
-        <div class="modale-section">
           <label>Format</label>
           <div class="radio-ligne">
             <label><input type="radio" name="format-export" value="ods" checked> ODS (tableur)</label>
@@ -911,9 +896,6 @@ function ouvrirModaleExport() {
       </div>
     </div>`;
 
-  document.getElementById('check-comparaison').addEventListener('change', (e) => {
-    document.getElementById('check-departements').style.display = e.target.checked ? '' : 'none';
-  });
   document.getElementById('btn-annuler-export').addEventListener('click', fermerModaleExport);
   document.getElementById('voile-export').addEventListener('click', (e) => {
     if (e.target.id === 'voile-export') fermerModaleExport();
@@ -953,35 +935,7 @@ async function genererExport() {
     commentaire: l.Commentaire || ''
   })));
 
-  // Lignes de comparaison (autres departements / region), uniquement
-  // pour les indicateurs de type DE_Performance rattaches a un indicateur
-  let lignesComparaison = [];
-  const comparaisonDemandee = document.getElementById('check-comparaison').checked;
-  if (comparaisonDemandee) {
-    const departementsChoisis = Array.from(document.querySelectorAll('#check-departements input:checked')).map(c => Number(c.value));
-    const indicateursConcernes = new Set();
-    groupesChoisis.forEach(g => {
-      if (g[0].Type_cible !== 'DE_Performance') return;
-      const liens = TABLES.indicateurDe2.filter(l => l.Donnee_elementaire === g[0].Ref_DE_Performance);
-      liens.forEach(l => indicateursConcernes.add(l.Indicateur));
-    });
-    lignesComparaison = TABLES.resultatsIndicateurs
-      .filter(r => indicateursConcernes.has(r.Indicateur_Performance) && departementsChoisis.includes(r.Departement))
-      .map(r => {
-        const dep = TABLES.departements.find(d => d.id === r.Departement);
-        const indic = TABLES.indicPerf.find(ip => ip.id === r.Indicateur_Performance);
-        return {
-          territoire: dep ? dep.Libelle : 'Territoire inconnu',
-          indicateur: indic ? indic.Libelle : '',
-          periode: `${r.Periode_valeur} ${r.Annee}`,
-          valeur: r.Valeur,
-          statut: r.Statut || '',
-          commentaire: ''
-        };
-      });
-  }
-
-  const toutesLesLignes = [...lignesService, ...lignesComparaison];
+  const toutesLesLignes = [...lignesService];
   const format = document.querySelector('input[name="format-export"]:checked').value;
   const select = document.getElementById('select-service');
   const serviceLabel = select.options[select.selectedIndex].text;
