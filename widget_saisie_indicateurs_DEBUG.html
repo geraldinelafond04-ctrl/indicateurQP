@@ -405,6 +405,16 @@ async function chargerDonnees() {
     resultatsIndicateurs: tableEnLignes(resultatsIndicateurs),
     cartouche: tableEnLignes(cartouche)
   };
+  // --- DEBUG TEMPORAIRE : donnees brutes RESULTATS_INDICATEURS, avant/apres conversion ---
+  console.log('[DEBUG brut] cles de l objet resultatsIndicateurs recu de fetchTable :', Object.keys(resultatsIndicateurs));
+  console.log('[DEBUG brut] nombre de lignes (resultatsIndicateurs.id.length) :', resultatsIndicateurs.id ? resultatsIndicateurs.id.length : 'PAS DE CHAMP id !');
+  console.log('[DEBUG brut] 10 premieres valeurs brutes de Indicateur_Performance :', (resultatsIndicateurs.Indicateur_Performance || []).slice(0, 10));
+  console.log('[DEBUG brut] TABLES.resultatsIndicateurs.length apres conversion :', tableEnLignes(resultatsIndicateurs).length);
+  console.log('[DEBUG brut] 10 premieres lignes converties (id + Indicateur_Performance) :',
+    tableEnLignes(resultatsIndicateurs).slice(0, 10).map(r => ({ id: r.id, Indicateur_Performance: r.Indicateur_Performance })));
+  console.log('[DEBUG brut] lignes converties avec Indicateur_Performance == 49 (comparaison stricte ===) :',
+    tableEnLignes(resultatsIndicateurs).filter(r => r.Indicateur_Performance === 49));
+  // --- FIN DEBUG TEMPORAIRE ---
   // Note : SERVICES.Actif est une formule vide dans ce document (toujours
   // fausse) -> on ne filtre pas dessus tant qu'elle n'est pas programmee.
   SERVICES = tableEnLignes(services);
